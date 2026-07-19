@@ -27,6 +27,18 @@ struct ChatMessageOut {
     content: String,
 }
 
+/// Models that are FREE on OpenRouter. The gardener will ONLY ever call one of
+/// these. Anything else (including paid models) is rejected at construction
+/// time, so this binary can never accidentally spend credits.
+const FREE_MODELS: &[&str] = &[
+    "google/gemini-flash-8b:free",
+    "meta-llama/llama-3.1-8b-instruct:free",
+    "meta-llama/llama-3.2-3b-instruct:free",
+    "deepseek/deepseek-chat-v3-0324:free",
+    "qwen/qwen2.5-7b-instruct:free",
+    "microsoft/phi-3-mini-128k-instruct:free",
+];
+
 /// Minimal OpenRouter client. Reads OPENROUTER_API_KEY from env (via dotenvy).
 pub struct Gardener {
     client: reqwest::Client,
@@ -40,10 +52,24 @@ impl Gardener {
     pub fn new(model: impl Into<String>, width: usize, height: usize) -> Result<Self> {
         let api_key = std::env::var("OPENROUTER_API_KEY")
             .map_err(|_| anyhow::anyhow!("OPENROUTER_API_KEY not set (add it to .env)"))?;
+
+        // Enforce free-tier only. Fall back to the default free model if the
+        // requested one isn't on the allowlist (and warn), rather than silently
+        // allowing a paid model through.
+        let requested = model.into();
+        let model = if FREE_MODELS.contains(&requested.as_str()) {
+            requested
+        } else {
+            eprintln!(
+                "⚠ model '{requested}' is not on the free allowlist; using default free model instead"
+            );
+            "google/gemini-flash-8b:free".to_string()
+        };
+
         Ok(Self {
             client: reqwest::Client::new(),
             api_key,
-            model: model.into(),
+            model,
             width,
             height,
         })
