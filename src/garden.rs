@@ -8,6 +8,8 @@ pub enum Action {
     PlaceRock { x: usize, y: usize, size: u8 },
     /// Rake a horizontal line of sand between two columns on a row.
     RakeLine { y: usize, x1: usize, x2: usize },
+    /// Rake a concentric circular ring of sand centered at (cx, cy) with given radius.
+    RakeRing { cx: usize, cy: usize, radius: usize },
     /// Place a patch of moss at (x, y).
     PlaceMoss { x: usize, y: usize },
     /// Scatter gravel across a horizontal span on a row.
@@ -16,6 +18,8 @@ pub enum Action {
     PlaceFlower { x: usize, y: usize },
     /// Place a stone lantern at (x, y).
     PlaceLantern { x: usize, y: usize },
+    /// Place a geometric minimalist mandala or fractal accent at (x, y). `style` 1-6 controls the glyph.
+    PlaceMandala { x: usize, y: usize, style: u8 },
     /// Draw a border frame around the whole garden.
     DrawBorder,
     /// Signal that the garden is complete.
@@ -33,6 +37,14 @@ pub const MOSS: &str = "🌿";
 pub const GRAVEL: &str = "··";
 pub const FLOWER: &str = "🌸";
 pub const LANTERN: &str = "🏮";
+
+// Mandala & Fractal Minimalist Glyphs (2 columns wide)
+pub const ENSO: &str = "⭕";
+pub const MANDALA_RING: &str = "◎ ";
+pub const MANDALA_CORE: &str = "◈ ";
+pub const FRACTAL_STAR: &str = "✦ ";
+pub const YIN_YANG: &str = "☯ ";
+pub const CREST: &str = "❖ ";
 
 /// The ASCII + emoji zen garden grid.
 /// Each cell is a 2-column-wide string so emojis and ASCII mix cleanly.
@@ -87,6 +99,37 @@ impl Garden {
         }
     }
 
+    /// Helper to compute grid coordinates around a circle circumference.
+    pub fn ring_points(&self, cx: usize, cy: usize, radius: usize) -> Vec<(usize, usize)> {
+        let mut points = Vec::new();
+        let r = radius as f64;
+        // Step around 360 degrees
+        for deg in (0..360).step_by(10) {
+            let rad = (deg as f64).to_radians();
+            let dx = (r * rad.cos()).round() as isize;
+            let dy = (r * rad.sin()).round() as isize;
+            let px = cx as isize + dx;
+            let py = cy as isize + dy;
+            if px >= 1 && px < (self.width.saturating_sub(1)) as isize && py >= 1 && py < (self.height.saturating_sub(1)) as isize {
+                let pt = (px as usize, py as usize);
+                if !points.contains(&pt) {
+                    points.push(pt);
+                }
+            }
+        }
+        points
+    }
+
+    #[allow(dead_code)]
+    pub fn rake_ring(&mut self, cx: usize, cy: usize, radius: usize) {
+        let pts = self.ring_points(cx, cy, radius);
+        for (x, y) in pts {
+            if self.is_empty(x, y) {
+                self.grid[y][x] = RAKED.to_string();
+            }
+        }
+    }
+
     pub fn place_moss(&mut self, x: usize, y: usize) {
         if y >= self.height || x >= self.width {
             return;
@@ -124,6 +167,23 @@ impl Garden {
         }
         if self.is_empty(x, y) {
             self.grid[y][x] = LANTERN.to_string();
+        }
+    }
+
+    pub fn place_mandala(&mut self, x: usize, y: usize, style: u8) {
+        if y >= self.height || x >= self.width {
+            return;
+        }
+        let glyph = match style.clamp(1, 6) {
+            1 => ENSO,
+            2 => MANDALA_RING,
+            3 => MANDALA_CORE,
+            4 => FRACTAL_STAR,
+            5 => YIN_YANG,
+            _ => CREST,
+        };
+        if self.is_empty(x, y) {
+            self.grid[y][x] = glyph.to_string();
         }
     }
 

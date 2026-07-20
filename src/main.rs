@@ -1,16 +1,45 @@
 mod garden;
 mod llm;
 
+use std::io::BufRead;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use clap::Parser;
 use garden::{Action, Garden, BORDER, GRAVEL, RAKED};
-use llm::Gardener;
+use llm::{Gardener, THEMES};
 
-const WIDTH: usize = 48;
-const HEIGHT: usize = 20;
 /// Session duration: 30 minutes per garden before automatic reset.
 const SESSION_DURATION: Duration = Duration::from_secs(30 * 60);
+
+#[derive(Parser, Debug, Clone)]
+#[command(name = "karesansui")]
+#[command(about = "A minimalist ASCII & emoji zen garden, mandala & fractal generator tended by a turtle and an LLM.")]
+pub struct CliArgs {
+    /// Choose a specific theme by name or index (1-17), or "random"
+    #[arg(short, long)]
+    pub theme: Option<String>,
+
+    /// Grid width in terminal columns (default: 48)
+    #[arg(short, long, default_value_t = 48)]
+    pub width: usize,
+
+    /// Grid height in terminal rows (default: 20)
+    #[arg(long, default_value_t = 20)]
+    pub height: usize,
+
+    /// Seconds between normal LLM prompts (default: 6)
+    #[arg(short, long, default_value_t = 6)]
+    pub pace: u64,
+
+    /// Seconds to rest after every 10 prompts (default: 30)
+    #[arg(long, default_value_t = 30)]
+    pub rest: u64,
+
+    /// Interactive menu mode to select themes and settings on startup
+    #[arg(short, long, default_value_t = false)]
+    pub interactive: bool,
+}
 
 /// Helper: animate the turtle walking across the garden to (dest_x, dest_y).
 async fn animate_walk(
@@ -39,17 +68,90 @@ async fn animate_walk(
     Ok(())
 }
 
+/// Present a clean interactive menu for picking theme and settings.
+fn interactive_menu(args: &mut CliArgs) -> Result<()> {
+    println!("\x1b[2J\x1b[H");
+    println!("🎋----------------------------------------------------------------------🎋");
+    println!("   karesansui (枯山水) — Minimalist Zen Garden, Mandala & Fractal CLI");
+    println!("🎋----------------------------------------------------------------------🎋\n");
+    println!("Choose your garden theme:");
+    
+    let mid = (THEMES.len() + 1) / 2;
+    for i in 0..mid {
+        let left_num = i + 1;
+        let left_name = THEMES[i].0;
+        let left_tag = if left_num >= 13 { " (✨ NEW)" } else { "" };
+        let left_str = format!("[{left_num}] {left_name}{left_tag}");
+
+        if i + mid < THEMES.len() {
+            let right_num = i + mid + 1;
+            let right_name = THEMES[i + mid].0;
+            let right_tag = if right_num >= 13 { " (✨ NEW)" } else { "" };
+            let right_str = format!("[{right_num}] {right_name}{right_tag}");
+            println!("  {left_str:<36} {right_str}");
+        } else {
+            println!("  {left_str}");
+        }
+    }
+    println!("  [0]  🎲 Random Theme\n");
+
+    let stdin = std::io::stdin();
+    let mut reader = stdin.lock();
+
+    print!("Enter theme number (0-{}) [default: 0]: ", THEMES.len());
+    std::io::Write::flush(&mut std::io::stdout())?;
+    let mut line = String::new();
+    if reader.read_line(&mut line).is_ok() && !line.trim().is_empty() {
+        let trimmed = line.trim();
+        if trimmed != "0" && !trimmed.eq_ignore_ascii_case("random") {
+            args.theme = Some(trimmed.to_string());
+        }
+    }
+
+    line.clear();
+    print!("Enter pace (seconds between moves) [default: {}]: ", args.pace);
+    std::io::Write::flush(&mut std::io::stdout())?;
+    if reader.read_line(&mut line).is_ok() && !line.trim().is_empty() {
+        if let Ok(p) = line.trim().parse::<u64>() {
+            args.pace = p;
+        }
+    }
+
+    line.clear();
+    print!("Enter rest (seconds after 10 moves) [default: {}]: ", args.rest);
+    std::io::Write::flush(&mut std::io::stdout())?;
+    if reader.read_line(&mut line).is_ok() && !line.trim().is_empty() {
+        if let Ok(r) = line.trim().parse::<u64>() {
+            args.rest = r;
+        }
+    }
+
+    println!("\n✨ Settings saved! The turtle (`🐢`) is getting ready...\n");
+    std::thread::sleep(Duration::from_secs(1));
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
+    let mut args = CliArgs::parse();
+
+    if args.interactive {
+        interactive_menu(&mut args)?;
+    }
 
     let model = std::env::var("OPENROUTER_MODEL")
         .unwrap_or_else(|_| "tencent/hy3:free".to_string());
 
+    let width = args.width;
+    let height = args.height;
+    let pace = args.pace;
+    let rest = args.rest;
+
     loop {
         let session_start = Instant::now();
-        let mut garden = Garden::new(WIDTH, HEIGHT);
-        let gardener = Gardener::new(&model, WIDTH, HEIGHT)?;
+        let mut garden = Garden::new(width, height);
+        let gardener = Gardener::new(&model, width, height, args.theme.as_deref())?;
         let theme = gardener.theme_name().to_string();
 
         let mut consecutive_errors = 0;
@@ -94,28 +196,28 @@ async fn main() -> Result<()> {
             match action {
                 Action::DrawBorder => {
                     // Turtle walks around the perimeter laying bamboo frame.
-                    for x in 0..WIDTH {
+                    for x in 0..width {
                         garden.grid[0][x] = BORDER.to_string();
                         garden.turtle_pos = Some((x, 0));
                         print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
                         std::io::Write::flush(&mut std::io::stdout())?;
                         tokio::time::sleep(Duration::from_millis(30)).await;
                     }
-                    for y in 0..HEIGHT {
-                        garden.grid[y][WIDTH - 1] = BORDER.to_string();
-                        garden.turtle_pos = Some((WIDTH - 1, y));
+                    for y in 0..height {
+                        garden.grid[y][width - 1] = BORDER.to_string();
+                        garden.turtle_pos = Some((width - 1, y));
                         print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
                         std::io::Write::flush(&mut std::io::stdout())?;
                         tokio::time::sleep(Duration::from_millis(30)).await;
                     }
-                    for x in (0..WIDTH).rev() {
-                        garden.grid[HEIGHT - 1][x] = BORDER.to_string();
-                        garden.turtle_pos = Some((x, HEIGHT - 1));
+                    for x in (0..width).rev() {
+                        garden.grid[height - 1][x] = BORDER.to_string();
+                        garden.turtle_pos = Some((x, height - 1));
                         print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
                         std::io::Write::flush(&mut std::io::stdout())?;
                         tokio::time::sleep(Duration::from_millis(30)).await;
                     }
-                    for y in (0..HEIGHT).rev() {
+                    for y in (0..height).rev() {
                         garden.grid[y][0] = BORDER.to_string();
                         garden.turtle_pos = Some((0, y));
                         print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
@@ -153,13 +255,20 @@ async fn main() -> Result<()> {
                     std::io::Write::flush(&mut std::io::stdout())?;
                     tokio::time::sleep(Duration::from_millis(500)).await;
                 }
+                Action::PlaceMandala { x, y, style } => {
+                    animate_walk(&mut garden, x, y, &header).await?;
+                    garden.place_mandala(x, y, style);
+                    print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
+                    std::io::Write::flush(&mut std::io::stdout())?;
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
                 Action::RakeLine { y, x1, x2 } => {
                     animate_walk(&mut garden, x1, y, &header).await?;
                     let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
                     let step_range: Vec<usize> = if x1 <= x2 {
-                        (a..=b.min(WIDTH.saturating_sub(1))).collect()
+                        (a..=b.min(width.saturating_sub(1))).collect()
                     } else {
-                        (a..=b.min(WIDTH.saturating_sub(1))).rev().collect()
+                        (a..=b.min(width.saturating_sub(1))).rev().collect()
                     };
                     for x in step_range {
                         garden.turtle_pos = Some((x, y));
@@ -171,13 +280,28 @@ async fn main() -> Result<()> {
                         tokio::time::sleep(Duration::from_millis(120)).await;
                     }
                 }
+                Action::RakeRing { cx, cy, radius } => {
+                    let pts = garden.ring_points(cx, cy, radius);
+                    if let Some(first) = pts.first() {
+                        animate_walk(&mut garden, first.0, first.1, &header).await?;
+                    }
+                    for (x, y) in pts {
+                        garden.turtle_pos = Some((x, y));
+                        if garden.is_empty(x, y) {
+                            garden.grid[y][x] = RAKED.to_string();
+                        }
+                        print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
+                        std::io::Write::flush(&mut std::io::stdout())?;
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                }
                 Action::PlaceGravel { y, x1, x2 } => {
                     animate_walk(&mut garden, x1, y, &header).await?;
                     let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
                     let step_range: Vec<usize> = if x1 <= x2 {
-                        (a..=b.min(WIDTH.saturating_sub(1))).collect()
+                        (a..=b.min(width.saturating_sub(1))).collect()
                     } else {
-                        (a..=b.min(WIDTH.saturating_sub(1))).rev().collect()
+                        (a..=b.min(width.saturating_sub(1))).rev().collect()
                     };
                     for x in step_range {
                         garden.turtle_pos = Some((x, y));
@@ -202,15 +326,14 @@ async fn main() -> Result<()> {
             }
 
             // Rate limiting & pacing between prompts:
-            // Send prompt every 6 seconds, and after every 10 prompts wait 30 seconds.
-            let wait_secs = if prompt_count % 10 == 0 { 30 } else { 6 };
+            let wait_secs = if prompt_count % 10 == 0 { rest } else { pace };
             garden.turtle_glyph = "💤";
             for remaining in (1..=wait_secs).rev() {
                 if session_start.elapsed() >= SESSION_DURATION {
                     break;
                 }
                 let status = if prompt_count % 10 == 0 {
-                    format!("[prompt #{prompt_count} — 💤 resting 30s rate-limit pause: {remaining}s remaining]")
+                    format!("[prompt #{prompt_count} — 💤 resting {rest}s rate-limit pause: {remaining}s remaining]")
                 } else {
                     format!("[prompt #{prompt_count} — 💤 resting: {remaining}s until next move]")
                 };
