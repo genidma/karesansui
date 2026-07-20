@@ -29,6 +29,7 @@ pub enum Action {
 
 /// Glyphs — each is exactly 2 terminal columns wide for alignment.
 pub const EMPTY: &str = "  ";
+#[allow(dead_code)]
 pub const BORDER: &str = "🎋";
 pub const RAKED: &str = "~~";
 pub const ROCK_S: &str = "🪨";
