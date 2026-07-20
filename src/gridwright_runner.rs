@@ -39,6 +39,10 @@ pub struct GridwrightRunner {
     model: String,
     config: GridwrightConfig,
     dry_run: bool,
+    pace: Duration,
+    step: bool,
+    no_color: bool,
+    snapshot_path: Option<String>,
 }
 
 impl GridwrightRunner {
@@ -54,10 +58,55 @@ impl GridwrightRunner {
             model,
             config,
             dry_run,
+            pace: Duration::from_millis(1500),
+            step: false,
+            no_color: false,
+            snapshot_path: None,
         }
     }
 
-    /// Run a complete Gridwright session: initialize canvas, get LLM actions, and execute them.
+    pub fn with_pace(mut self, pace: Duration) -> Self {
+        self.pace = pace;
+        self
+    }
+
+    pub fn with_step(mut self, step: bool) -> Self {
+        self.step = step;
+        self
+    }
+
+    pub fn with_no_color(mut self, no_color: bool) -> Self {
+        self.no_color = no_color;
+        self
+    }
+
+    pub fn with_snapshot_path(mut self, path: Option<String>) -> Self {
+        self.snapshot_path = path;
+        self
+    }
+
+    /// Helper: render live canvas screen without flicker using crossterm.
+    fn render_live_screen(&self, header: &str, canvas: &Canvas) -> Result<()> {
+        use crossterm::{cursor, terminal};
+        use std::io::Write;
+        let mut stdout = std::io::stdout();
+        let _ = crossterm::queue!(stdout, cursor::Hide, cursor::MoveTo(0, 0));
+        let rendered = if self.no_color {
+            canvas.render()
+        } else {
+            canvas.render_with_colors()
+        };
+        let full_text = format!("{header}\n\n{rendered}");
+        for line in full_text.lines() {
+            let _ = crossterm::queue!(stdout, terminal::Clear(terminal::ClearType::UntilNewLine));
+            let _ = writeln!(stdout, "{line}");
+        }
+        let _ = crossterm::queue!(stdout, terminal::Clear(terminal::ClearType::FromCursorDown));
+        let _ = stdout.flush();
+        Ok(())
+    }
+
+    /// Run a complete Gridwright session: initialize canvas, get LLM actions, and execute them with live rendering.
     pub async fn run(&self) -> Result<Canvas> {
         let mut canvas = Canvas::new(self.config.width, self.config.height);
         let palette = self.select_palette(&self.config.palette);
@@ -71,6 +120,15 @@ impl GridwrightRunner {
         );
 
         canvas.set_palette(&self.config.palette);
+
+        // Initial screen render
+        let header = format!(
+            "🎨 Gridwright — Subject: \"{}\" | Palette: \"{}\"  [initializing...]",
+            self.config.subject,
+            canvas.palette.as_deref().unwrap_or(&self.config.palette)
+        );
+        let _ = self.render_live_screen(&header, &canvas);
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
         let mut action_count = 0;
         loop {
@@ -86,15 +144,23 @@ impl GridwrightRunner {
                 break;
             }
 
-            let action = self
-                .get_next_action(&canvas, action_count)
-                .await
-                .map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to get action #{}: {e}",
-                        action_count
-                    )
-                })?;
+            let header = format!(
+                "🎨 Gridwright — Subject: \"{}\" | Palette: \"{}\"  [action #{}/{} — thinking...]",
+                self.config.subject,
+                canvas.palette.as_deref().unwrap_or(&self.config.palette),
+                action_count,
+                self.config.max_actions
+            );
+            let _ = self.render_live_screen(&header, &canvas);
+
+            let action = match self.get_next_action(&canvas, action_count).await {
+                Ok(a) => a,
+                Err(e) => {
+                    log::warn!("Failed to get action #{}: {}", action_count, e);
+                    tokio::time::sleep(Duration::from_millis(1500)).await;
+                    continue;
+                }
+            };
 
             let is_done = match PixelArtExecutor::execute(&action, &mut canvas, &palette) {
                 Ok(done) => done,
@@ -104,12 +170,42 @@ impl GridwrightRunner {
                 }
             };
 
+            let header = format!(
+                "🎨 Gridwright — Subject: \"{}\" | Palette: \"{}\"  [action #{}/{}]",
+                self.config.subject,
+                canvas.palette.as_deref().unwrap_or(&self.config.palette),
+                action_count,
+                self.config.max_actions
+            );
+            let _ = self.render_live_screen(&header, &canvas);
+
+            if let Some(ref snapshot_path) = self.snapshot_path {
+                let rendered = if self.no_color {
+                    canvas.render()
+                } else {
+                    canvas.render_with_colors()
+                };
+                let _ = std::fs::write(snapshot_path, rendered);
+            }
+
             if is_done {
-                log::info!(
-                    "🎨 Composition complete after {} actions",
-                    action_count
+                let header = format!(
+                    "🎨 Gridwright — Subject: \"{}\" | Palette: \"{}\"  [✨ Masterpiece Complete!]",
+                    self.config.subject,
+                    canvas.palette.as_deref().unwrap_or(&self.config.palette)
                 );
+                let _ = self.render_live_screen(&header, &canvas);
+                log::info!("🎨 Composition complete after {} actions", action_count);
                 break;
+            }
+
+            if self.step {
+                log::info!("Step completed (action #{action_count}). Exiting step mode.");
+                break;
+            }
+
+            if self.pace > Duration::ZERO {
+                tokio::time::sleep(self.pace).await;
             }
         }
 
@@ -121,8 +217,8 @@ impl GridwrightRunner {
         let canvas_preview = self.render_canvas_preview(canvas);
         let system_prompt = self.config.generate_system_prompt();
         let user_prompt = format!(
-            "Canvas state (action #{}):\n{}\n\nProvide your next action as valid JSON.",
-            action_num, canvas_preview
+            "Canvas state (action #{} of {} max):\n{}\n\nProvide your next action as ONE single valid JSON object from your capability toolkit (`clear_canvas`, `fill_rectangle`, `draw_rectangle`, `fill_circle`, `draw_circle`, `draw_line_h`, `draw_line_v`, `draw_line_diag`, `draw_path`, `set_pixel`, or `done`). Use exact coordinate math (`x: 0..{}`, `y: 0..{}`), `color_index` (`0..7`), and 2-character wide block glyphs (`██`, `▓▓`, `▒▒`, `░░`, `■ `, `  `).",
+            action_num, self.config.max_actions, canvas_preview, self.config.width.saturating_sub(1), self.config.height.saturating_sub(1)
         );
 
         if self.dry_run {
@@ -235,7 +331,7 @@ impl GridwrightRunner {
             for y in (0..canvas.height).step_by(2) {
                 for x in (0..canvas.width).step_by(2) {
                     if let Some(pixel) = canvas.get_pixel(crate::vec::Point::new(x, y)) {
-                        if pixel.glyph != " " {
+                        if pixel.glyph != "  " && pixel.glyph != " " {
                             preview.push_str(&pixel.glyph);
                         } else {
                             preview.push('·');
@@ -257,7 +353,7 @@ impl GridwrightRunner {
             .pixels
             .iter()
             .flat_map(|row| row.iter())
-            .filter(|p| p.glyph != " ")
+            .filter(|p| p.glyph != "  " && p.glyph != " ")
             .count()
     }
 
@@ -284,36 +380,39 @@ impl GridwrightRunner {
         let choice = rng.random_range(0..8);
         Ok(match choice {
             0 => PixelArtAction::SetPixel {
-                x: rng.random_range(0..max_x),
-                y: rng.random_range(0..max_y),
-                glyph: ["■", "●", "▓", "▒", "░", "#", "*"].choose(&mut rng).unwrap().to_string(),
-                color_index: Some(rng.random_range(0..3)),
+                x: rng.random_range(0..=max_x),
+                y: rng.random_range(0..=max_y),
+                glyph: ["██", "▓▓", "▒▒", "░░", "■ ", "▪ "].choose(&mut rng).unwrap().to_string(),
+                color_index: Some(rng.random_range(0..8)),
             },
             1 => PixelArtAction::DrawLineH {
-                y: rng.random_range(0..max_y),
+                y: rng.random_range(0..=max_y),
                 x1: 0,
                 x2: max_x,
-                glyph: "─".to_string(),
+                glyph: "██".to_string(),
+                color_index: Some(rng.random_range(0..8)),
             },
             2 => PixelArtAction::DrawLineV {
-                x: rng.random_range(0..max_x),
+                x: rng.random_range(0..=max_x),
                 y1: 0,
                 y2: max_y,
-                glyph: "│".to_string(),
+                glyph: "██".to_string(),
+                color_index: Some(rng.random_range(0..8)),
             },
             3 => PixelArtAction::DrawCircle {
                 cx: max_x / 2,
                 cy: max_y / 2,
                 radius: rng.random_range(2..8),
-                glyph: "◦".to_string(),
+                glyph: "▓▓".to_string(),
+                color_index: Some(rng.random_range(0..8)),
             },
             4 => PixelArtAction::FillRectangle {
                 x1: rng.random_range(0..max_x / 2),
                 y1: rng.random_range(0..max_y / 2),
-                x2: rng.random_range(max_x / 2..max_x),
-                y2: rng.random_range(max_y / 2..max_y),
-                glyph: "█".to_string(),
-                color_index: Some(rng.random_range(0..2)),
+                x2: rng.random_range(max_x / 2..=max_x),
+                y2: rng.random_range(max_y / 2..=max_y),
+                glyph: "██".to_string(),
+                color_index: Some(rng.random_range(0..8)),
             },
             5 => PixelArtAction::SetPalette {
                 palette_name: ["monochrome", "zen_earth", "night_sky", "gridwright_spec"]
@@ -323,15 +422,16 @@ impl GridwrightRunner {
             },
             6 => PixelArtAction::DrawPath {
                 points: vec![(2, 2), (6, 5), (10, 3), (13, 8)],
-                glyph: "█".to_string(),
-                color_index: Some(rng.random_range(0..4)),
+                glyph: "██".to_string(),
+                color_index: Some(rng.random_range(0..8)),
             },
             7 => PixelArtAction::DrawRectangle {
                 x1: 3,
                 y1: 3,
                 x2: 11,
                 y2: 11,
-                glyph: "▓".to_string(),
+                glyph: "▒▒".to_string(),
+                color_index: Some(rng.random_range(0..8)),
             },
             _ => PixelArtAction::Done,
         })

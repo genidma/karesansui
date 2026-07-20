@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum PixelArtAction {
-    /// Set the active palette by name (e.g., "zen_earth", "vibrant_neon").
+    /// Set the active palette by name (e.g., "gridwright_spec", "zen_earth", "vibrant_neon").
     SetPalette { palette_name: String },
 
     /// Place a single pixel at (x, y) with a specific glyph.
@@ -27,6 +27,7 @@ pub enum PixelArtAction {
         x1: usize,
         x2: usize,
         glyph: String,
+        color_index: Option<usize>,
     },
 
     /// Draw a vertical line from (x, y1) to (x, y2) with a glyph.
@@ -35,6 +36,7 @@ pub enum PixelArtAction {
         y1: usize,
         y2: usize,
         glyph: String,
+        color_index: Option<usize>,
     },
 
     /// Draw a diagonal line from (x1, y1) to (x2, y2).
@@ -44,6 +46,7 @@ pub enum PixelArtAction {
         x2: usize,
         y2: usize,
         glyph: String,
+        color_index: Option<usize>,
     },
 
     /// Draw a path through a sequence of points.
@@ -59,6 +62,7 @@ pub enum PixelArtAction {
         cy: usize,
         radius: usize,
         glyph: String,
+        color_index: Option<usize>,
     },
 
     /// Fill a circle at (cx, cy) with radius r.
@@ -87,10 +91,14 @@ pub enum PixelArtAction {
         x2: usize,
         y2: usize,
         glyph: String,
+        color_index: Option<usize>,
     },
 
     /// Fill the entire canvas with a background glyph.
-    ClearCanvas { glyph: String },
+    ClearCanvas {
+        glyph: String,
+        color_index: Option<usize>,
+    },
 
     /// Signal composition complete; render and return the final canvas state.
     Done,
@@ -98,33 +106,81 @@ pub enum PixelArtAction {
 
 /// System prompt template for Gridwright LLM pixel art generation.
 pub const GRIDWRIGHT_SYSTEM_PROMPT: &str = r#"You are Gridwright: a master of deliberate grid-as-craft pixel art.
-Every cell is a choice. Every glyph is intentional. You compose pixel art by commanding a canvas through structured, mathematical actions.
+Every cell is a choice. Every glyph is intentional. You compose pixel art by commanding a mathematical canvas engine through structured JSON actions.
 
-Your canvas is {{WIDTH}} cells wide × {{HEIGHT}} cells tall.
-Each cell is exactly one pixel. No scaling. No smoothing. No interpolation. Hard edges only.
+### 1. THE CANVAS & PIXEL GEOMETRY (`vec` & `canvas` modules)
+- Your canvas is exactly {{WIDTH}} cells wide × {{HEIGHT}} cells tall.
+- Coordinate system: `x: 0..{{WIDTH_MINUS_ONE}}` (horizontal, left-to-right), `y: 0..{{HEIGHT_MINUS_ONE}}` (vertical, top-to-bottom). Top-left is `(0,0)`.
+- Each cell maps to exactly one pixel. Hard edges only: no auto-scaling, no smoothing, no interpolation.
+- **Terminal Proportion Rule**: To maintain chunky, visible pixels and true square proportions in the terminal (since terminal fonts are taller than they are wide), you MUST use 2-character wide block glyphs:
+  - Solid blocks: `"██"` (solid fill), `"▓▓"` (dense shade / shadow), `"▒▒"` (medium shade / midtone), `"░░"` (light shade / highlight)
+  - Geometric accents: `"■ "` (chunky square), `"▪ "` (small square pixel), `"  "` (empty space / void)
 
-Use a chunky, visible-pixel style with clear silhouettes and strong negative space. Favor balanced blocks over fine detail.
+### 2. PALETTE & COLOR ASSIGNMENT ENGINE (`color` module)
+When using the `"gridwright_spec"` palette, assign colors using `color_index` (integer `0..7`):
+- `0`: `#0b0c10` (Deep space / pitch black) — Backgrounds, deep voids, outline dropshadows.
+- `1`: `#1f2833` (Slate blue / dark gray) — Structural silhouettes, secondary masses, rocky shadows.
+- `2`: `#45a29e` (Teal / mid cyan) — Atmospheric midtones, water depth, foliage shading.
+- `3`: `#66fcf1` (Cyan glow) — High-energy accents, neon edges, magical aura, bright highlights.
+- `4`: `#c5c6c7` (Light gray / silver) — Metallic sheen, stone highlights, neutral contrast.
+- `5`: `#f2a65a` (Warm orange / gold) — Sunlight, fire, sunset horizons, warm focal points.
+- `6`: `#ef476f` (Rose red / crimson) — Primary focal point, bold berries/blossoms, dramatic silhouettes.
+- `7`: `#ffffff` (Pure white) — Specular reflections, stars, eye glints, crisp rim lighting.
 
-You have access to these palette options:
-- "gridwright_spec" — exact 8-color palette: #0b0c10, #1f2833, #45a29e, #66fcf1, #c5c6c7, #f2a65a, #ef476f, #ffffff
-- "monochrome" — black/white
-- "zen_earth" — warm earthy tones
-- "night_sky" — cool nocturnal tones
+Other selectable palettes via `set_palette`: `"zen_earth"`, `"night_sky"`, `"vibrant_neon"`, `"monochrome"`.
 
-You compose by returning JSON actions in sequence:
-1. SetPalette — choose your palette
-2. SetPixel, DrawLineH/V/Diag, DrawPath, DrawCircle, FillCircle, FillRectangle, DrawRectangle, ClearCanvas — build your subject
-3. Done — complete
+### 3. COMPLETE ACTION TOOLKIT & CAPABILITIES
+You compose by returning ONE single valid JSON action per turn. Use the following geometric capabilities:
 
-Your subject & composition are driven by:
-- **Subject**: {{SUBJECT}} (what you will depict)
-- **Palette**: {{PALETTE}} (the color intent)
-- **Composition**: {{COMPOSITION}} (balance, negative space, clean edges)
+1. **Set Palette** (turn 1):
+   {"action": "set_palette", "palette_name": "{{PALETTE}}"}
 
-Every action is deliberate. Every choice matters. No filler. No approximation.
-Think in blocks, silhouettes, and strong structure. Leave breathing room. Keep edges crisp and defined.
+2. **Clear / Background Base**:
+   {"action": "clear_canvas", "glyph": "  ", "color_index": 0}
 
-Return your next action as valid JSON, nothing else."#;
+3. **Solid Masses & Silhouettes (`fill_rectangle`, `fill_circle`)**:
+   - Fill rectangular region (`x1, y1` to `x2, y2`):
+     {"action": "fill_rectangle", "x1": 2, "y1": 2, "x2": 13, "y2": 13, "glyph": "██", "color_index": 1}
+   - Solid geometric circle (Bresenham midpoint fill):
+     {"action": "fill_circle", "cx": 8, "cy": 8, "radius": 4, "glyph": "██", "color_index": 5}
+
+4. **Crisp Outlines & Borders (`draw_rectangle`, `draw_circle`)**:
+   - Border outline rectangle (`rect_outline` math):
+     {"action": "draw_rectangle", "x1": 2, "y1": 2, "x2": 13, "y2": 13, "glyph": "██", "color_index": 3}
+   - 1-pixel circle ring outline:
+     {"action": "draw_circle", "cx": 8, "cy": 8, "radius": 5, "glyph": "▓▓", "color_index": 6}
+
+5. **Structural & Contoured Lines (`draw_line_h`, `draw_line_v`, `draw_line_diag`, `draw_path`)**:
+   - Horizontal line:
+     {"action": "draw_line_h", "y": 10, "x1": 4, "x2": 11, "glyph": "██", "color_index": 7}
+   - Vertical line:
+     {"action": "draw_line_v", "x": 8, "y1": 4, "y2": 11, "glyph": "██", "color_index": 7}
+   - Diagonal segment (Bresenham exact line):
+     {"action": "draw_line_diag", "x1": 3, "y1": 3, "x2": 12, "y2": 12, "glyph": "▒▒", "color_index": 4}
+   - Connected multi-point path (for mountain ridges, rivers, lightning, organic contours):
+     {"action": "draw_path", "points": [[4,4], [7,5], [11,8], [14,12]], "glyph": "██", "color_index": 2}
+
+6. **Precision Pixel Placement (`set_pixel`)**:
+   - Single exact pixel (for stars, eye glints, corner bevels, or stippling):
+     {"action": "set_pixel", "x": 8, "y": 8, "glyph": "██", "color_index": 7}
+
+7. **Finish & Render**:
+   {"action": "done"}
+
+### 4. MASTER PIXEL ART COMPOSITION WORKFLOW
+- **Layer 1 (Void & Sky)**: Establish base canvas with `clear_canvas` or broad `fill_rectangle`.
+- **Layer 2 (Dominant Silhouettes)**: Lay down major masses (`fill_rectangle`, `fill_circle`) with dark/mid colors (`color_index: 0, 1, 2`).
+- **Layer 3 (Structural Contours)**: Define edges, horizons, and architectural form with `draw_line_h/v/diag`, `draw_rectangle`, `draw_circle`, and `draw_path`.
+- **Layer 4 (Texturing & Shading)**: Use shade glyphs (`"▓▓"`, `"▒▒"`, `"░░"`) with midtone/accent colors (`color_index: 4, 5, 6`) to create depth and tactile gradients without blurring.
+- **Layer 5 (Specular Highlights)**: Place intentional white (`7`) or cyan glow (`3`) single pixels (`set_pixel`) on top-left vertices and focal centers to make the art pop.
+
+### YOUR SESSION BRIEFing
+- **Subject**: {{SUBJECT}}
+- **Palette**: {{PALETTE}}
+- **Composition Intent**: {{COMPOSITION}}
+
+Every action must be deliberate. Think in chunky blocks, sharp silhouettes, and strong structure. Leave breathing room.
+Return ONLY valid JSON for your next action, nothing else."#;
 
 /// Configuration for Gridwright pixel art composition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,6 +230,8 @@ impl GridwrightConfig {
         GRIDWRIGHT_SYSTEM_PROMPT
             .replace("{{WIDTH}}", &self.width.to_string())
             .replace("{{HEIGHT}}", &self.height.to_string())
+            .replace("{{WIDTH_MINUS_ONE}}", &self.width.saturating_sub(1).to_string())
+            .replace("{{HEIGHT_MINUS_ONE}}", &self.height.saturating_sub(1).to_string())
             .replace("{{SUBJECT}}", &self.subject)
             .replace("{{PALETTE}}", &self.palette)
             .replace("{{COMPOSITION}}", &self.composition)
@@ -211,13 +269,33 @@ impl PixelArtExecutor {
                 Ok(false)
             }
 
-            PixelArtAction::DrawLineH { y, x1, x2, glyph } => {
-                canvas.draw_line(Point::new(*x1, *y), Point::new(*x2, *y), glyph);
+            PixelArtAction::DrawLineH { y, x1, x2, glyph, color_index } => {
+                let from = Point::new(*x1, *y);
+                let to = Point::new(*x2, *y);
+                if let Some(idx) = color_index {
+                    if let Some(color) = palette.get(*idx) {
+                        canvas.draw_line_colored(from, to, glyph, color);
+                    } else {
+                        canvas.draw_line(from, to, glyph);
+                    }
+                } else {
+                    canvas.draw_line(from, to, glyph);
+                }
                 Ok(false)
             }
 
-            PixelArtAction::DrawLineV { x, y1, y2, glyph } => {
-                canvas.draw_line(Point::new(*x, *y1), Point::new(*x, *y2), glyph);
+            PixelArtAction::DrawLineV { x, y1, y2, glyph, color_index } => {
+                let from = Point::new(*x, *y1);
+                let to = Point::new(*x, *y2);
+                if let Some(idx) = color_index {
+                    if let Some(color) = palette.get(*idx) {
+                        canvas.draw_line_colored(from, to, glyph, color);
+                    } else {
+                        canvas.draw_line(from, to, glyph);
+                    }
+                } else {
+                    canvas.draw_line(from, to, glyph);
+                }
                 Ok(false)
             }
 
@@ -227,8 +305,19 @@ impl PixelArtExecutor {
                 x2,
                 y2,
                 glyph,
+                color_index,
             } => {
-                canvas.draw_line(Point::new(*x1, *y1), Point::new(*x2, *y2), glyph);
+                let from = Point::new(*x1, *y1);
+                let to = Point::new(*x2, *y2);
+                if let Some(idx) = color_index {
+                    if let Some(color) = palette.get(*idx) {
+                        canvas.draw_line_colored(from, to, glyph, color);
+                    } else {
+                        canvas.draw_line(from, to, glyph);
+                    }
+                } else {
+                    canvas.draw_line(from, to, glyph);
+                }
                 Ok(false)
             }
 
@@ -272,8 +361,18 @@ impl PixelArtExecutor {
                 cy,
                 radius,
                 glyph,
+                color_index,
             } => {
-                canvas.draw_circle(Point::new(*cx, *cy), *radius, glyph);
+                let center = Point::new(*cx, *cy);
+                if let Some(idx) = color_index {
+                    if let Some(color) = palette.get(*idx) {
+                        canvas.draw_circle_colored(center, *radius, glyph, color);
+                    } else {
+                        canvas.draw_circle(center, *radius, glyph);
+                    }
+                } else {
+                    canvas.draw_circle(center, *radius, glyph);
+                }
                 Ok(false)
             }
 
@@ -284,23 +383,15 @@ impl PixelArtExecutor {
                 glyph,
                 color_index,
             } => {
+                let center = Point::new(*cx, *cy);
                 if let Some(idx) = color_index {
                     if let Some(color) = palette.get(*idx) {
-                        for y in 0..canvas.height {
-                            for x in 0..canvas.width {
-                                let point = Point::new(x, y);
-                                let dist_sq =
-                                    Point::new(*cx, *cy).distance_squared(point);
-                                if dist_sq <= radius * radius {
-                                    canvas.set_pixel_colored(point, glyph, color);
-                                }
-                            }
-                        }
+                        canvas.fill_circle_colored(center, *radius, glyph, color);
                     } else {
-                        canvas.fill_circle(Point::new(*cx, *cy), *radius, glyph);
+                        canvas.fill_circle(center, *radius, glyph);
                     }
                 } else {
-                    canvas.fill_circle(Point::new(*cx, *cy), *radius, glyph);
+                    canvas.fill_circle(center, *radius, glyph);
                 }
                 Ok(false)
             }
@@ -313,19 +404,16 @@ impl PixelArtExecutor {
                 glyph,
                 color_index,
             } => {
+                let from = Point::new(*x1, *y1);
+                let to = Point::new(*x2, *y2);
                 if let Some(idx) = color_index {
                     if let Some(color) = palette.get(*idx) {
-                        canvas.fill_rectangle_colored(
-                            Point::new(*x1, *y1),
-                            Point::new(*x2, *y2),
-                            glyph,
-                            color,
-                        );
+                        canvas.fill_rectangle_colored(from, to, glyph, color);
                     } else {
-                        canvas.fill_rectangle(Point::new(*x1, *y1), Point::new(*x2, *y2), glyph);
+                        canvas.fill_rectangle(from, to, glyph);
                     }
                 } else {
-                    canvas.fill_rectangle(Point::new(*x1, *y1), Point::new(*x2, *y2), glyph);
+                    canvas.fill_rectangle(from, to, glyph);
                 }
                 Ok(false)
             }
@@ -336,26 +424,33 @@ impl PixelArtExecutor {
                 x2,
                 y2,
                 glyph,
+                color_index,
             } => {
-                let (min_x, max_x) = if x1 <= x2 { (*x1, *x2) } else { (*x2, *x1) };
-                let (min_y, max_y) = if y1 <= y2 { (*y1, *y2) } else { (*y2, *y1) };
-
-                // Top and bottom
-                canvas.draw_line(Point::new(min_x, min_y), Point::new(max_x, min_y), glyph);
-                canvas.draw_line(Point::new(min_x, max_y), Point::new(max_x, max_y), glyph);
-
-                // Left and right
-                canvas.draw_line(Point::new(min_x, min_y), Point::new(min_x, max_y), glyph);
-                canvas.draw_line(Point::new(max_x, min_y), Point::new(max_x, max_y), glyph);
-
+                let from = Point::new(*x1, *y1);
+                let to = Point::new(*x2, *y2);
+                if let Some(idx) = color_index {
+                    if let Some(color) = palette.get(*idx) {
+                        canvas.draw_rectangle_colored(from, to, glyph, color);
+                    } else {
+                        canvas.draw_rectangle(from, to, glyph);
+                    }
+                } else {
+                    canvas.draw_rectangle(from, to, glyph);
+                }
                 Ok(false)
             }
 
-            PixelArtAction::ClearCanvas { glyph } => {
+            PixelArtAction::ClearCanvas { glyph, color_index } => {
                 canvas.clear();
+                let color = color_index.and_then(|idx| palette.get(idx));
                 for y in 0..canvas.height {
                     for x in 0..canvas.width {
-                        canvas.set_pixel(Point::new(x, y), glyph);
+                        let point = Point::new(x, y);
+                        if let Some(c) = color {
+                            canvas.set_pixel_colored(point, glyph, c);
+                        } else {
+                            canvas.set_pixel(point, glyph);
+                        }
                     }
                 }
                 Ok(false)
@@ -434,6 +529,7 @@ mod tests {
             x2: 8,
             y2: 8,
             glyph: "•".to_string(),
+            color_index: None,
         };
 
         let _ = PixelArtExecutor::execute(&action, &mut canvas, &palette);

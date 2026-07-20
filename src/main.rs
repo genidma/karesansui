@@ -264,12 +264,18 @@ async fn main() -> Result<()> {
         let is_wild = gardener.is_wild_zones();
 
         if theme.contains("Gridwright") {
-            let config = GridwrightConfig::new(16, 16)
+            let gw_w = if width != 48 || height != 20 { width } else { 16 };
+            let gw_h = if width != 48 || height != 20 { height } else { 16 };
+            let config = GridwrightConfig::new(gw_w, gw_h)
                 .with_subject("A bold, balanced pixel portrait with chunky blocks and strong negative space")
                 .with_palette("gridwright_spec")
                 .with_composition("Balanced, chunky blocks, hard edges, visible pixels, strong negative space")
                 .with_max_actions(20);
-            let runner = GridwrightRunner::new(gridwright_api_key.clone(), model.clone(), config, args.dry_run);
+            let runner = GridwrightRunner::new(gridwright_api_key.clone(), model.clone(), config, args.dry_run)
+                .with_pace(pace_duration)
+                .with_step(args.step)
+                .with_no_color(args.no_color)
+                .with_snapshot_path(args.snapshot.clone());
             let canvas = runner.run().await?;
             let rendered = if args.no_color {
                 canvas.render()

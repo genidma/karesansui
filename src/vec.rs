@@ -120,6 +120,25 @@ impl Point {
         points
     }
 
+    /// Generate points forming the outline of a rectangle from this to another point.
+    pub fn rect_outline(&self, other: Point) -> Vec<Point> {
+        let mut points = Vec::new();
+        let (min_x, max_x) = if self.x <= other.x { (self.x, other.x) } else { (other.x, self.x) };
+        let (min_y, max_y) = if self.y <= other.y { (self.y, other.y) } else { (other.y, self.y) };
+
+        for x in min_x..=max_x {
+            points.push(Point::new(x, min_y));
+            points.push(Point::new(x, max_y));
+        }
+        for y in min_y..=max_y {
+            points.push(Point::new(min_x, y));
+            points.push(Point::new(max_x, y));
+        }
+        points.sort();
+        points.dedup();
+        points
+    }
+
     /// Clamp this point to fit within grid bounds.
     pub fn clamp(&self, width: usize, height: usize) -> Point {
         Point::new(self.x.min(width.saturating_sub(1)), self.y.min(height.saturating_sub(1)))

@@ -1,7 +1,7 @@
 /// Canvas module: explicit grid rendering where each cell maps to exactly one pixel.
 /// No auto-scaling, no smoothing, no interpolation—pure deliberate placement.
 
-use crate::color::{Color, Palette};
+use crate::color::Color;
 use crate::vec::Point;
 use serde::{Deserialize, Serialize};
 
@@ -43,7 +43,7 @@ pub struct Canvas {
 impl Canvas {
     /// Create a new empty canvas.
     pub fn new(width: usize, height: usize) -> Self {
-        let empty_pixel = Pixel::new(0, 0, " ");
+        let empty_pixel = Pixel::new(0, 0, "  ");
         let pixels = vec![vec![empty_pixel; width]; height];
         Canvas {
             width,
@@ -91,12 +91,32 @@ impl Canvas {
         }
     }
 
+    /// Draw a line of pixels with a specific color from one point to another.
+    pub fn draw_line_colored(&mut self, from: Point, to: Point, glyph: impl Into<String>, color: Color) {
+        let glyph_str = glyph.into();
+        for point in from.line_to(to) {
+            if point.x < self.width && point.y < self.height {
+                self.set_pixel_colored(point, glyph_str.clone(), color);
+            }
+        }
+    }
+
     /// Draw a circle outline at a given radius.
     pub fn draw_circle(&mut self, center: Point, radius: usize, glyph: impl Into<String>) {
         let glyph_str = glyph.into();
         for point in center.circle_points(radius) {
             if point.x < self.width && point.y < self.height {
                 self.set_pixel(point, glyph_str.clone());
+            }
+        }
+    }
+
+    /// Draw a circle outline with a specific color at a given radius.
+    pub fn draw_circle_colored(&mut self, center: Point, radius: usize, glyph: impl Into<String>, color: Color) {
+        let glyph_str = glyph.into();
+        for point in center.circle_points(radius) {
+            if point.x < self.width && point.y < self.height {
+                self.set_pixel_colored(point, glyph_str.clone(), color);
             }
         }
     }
@@ -127,6 +147,32 @@ impl Canvas {
         }
     }
 
+    /// Draw a rectangle outline from one point to another.
+    pub fn draw_rectangle(&mut self, from: Point, to: Point, glyph: impl Into<String>) {
+        let glyph_str = glyph.into();
+        for point in from.rect_outline(to) {
+            if point.x < self.width && point.y < self.height {
+                self.set_pixel(point, glyph_str.clone());
+            }
+        }
+    }
+
+    /// Draw a rectangle outline with a specific color from one point to another.
+    pub fn draw_rectangle_colored(
+        &mut self,
+        from: Point,
+        to: Point,
+        glyph: impl Into<String>,
+        color: Color,
+    ) {
+        let glyph_str = glyph.into();
+        for point in from.rect_outline(to) {
+            if point.x < self.width && point.y < self.height {
+                self.set_pixel_colored(point, glyph_str.clone(), color);
+            }
+        }
+    }
+
     /// Draw a filled circle.
     pub fn fill_circle(&mut self, center: Point, radius: usize, glyph: impl Into<String>) {
         let glyph_str = glyph.into();
@@ -141,11 +187,25 @@ impl Canvas {
         }
     }
 
+    /// Draw a filled circle with a specific color.
+    pub fn fill_circle_colored(&mut self, center: Point, radius: usize, glyph: impl Into<String>, color: Color) {
+        let glyph_str = glyph.into();
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let point = Point::new(x, y);
+                let dist_sq = center.distance_squared(point);
+                if dist_sq <= radius * radius {
+                    self.set_pixel_colored(point, glyph_str.clone(), color);
+                }
+            }
+        }
+    }
+
     /// Clear the entire canvas (fill with spaces).
     pub fn clear(&mut self) {
         for y in 0..self.height {
             for x in 0..self.width {
-                self.pixels[y][x] = Pixel::new(x, y, " ");
+                self.pixels[y][x] = Pixel::new(x, y, "  ");
             }
         }
     }
@@ -234,8 +294,18 @@ impl CanvasBuilder {
         self
     }
 
+    pub fn draw_line_colored(mut self, from: Point, to: Point, glyph: impl Into<String>, color: Color) -> Self {
+        self.canvas.draw_line_colored(from, to, glyph, color);
+        self
+    }
+
     pub fn draw_circle(mut self, center: Point, radius: usize, glyph: impl Into<String>) -> Self {
         self.canvas.draw_circle(center, radius, glyph);
+        self
+    }
+
+    pub fn draw_circle_colored(mut self, center: Point, radius: usize, glyph: impl Into<String>, color: Color) -> Self {
+        self.canvas.draw_circle_colored(center, radius, glyph, color);
         self
     }
 
@@ -249,8 +319,44 @@ impl CanvasBuilder {
         self
     }
 
+    pub fn fill_rectangle_colored(
+        mut self,
+        from: Point,
+        to: Point,
+        glyph: impl Into<String>,
+        color: Color,
+    ) -> Self {
+        self.canvas.fill_rectangle_colored(from, to, glyph, color);
+        self
+    }
+
+    pub fn draw_rectangle(mut self, from: Point, to: Point, glyph: impl Into<String>) -> Self {
+        self.canvas.draw_rectangle(from, to, glyph);
+        self
+    }
+
+    pub fn draw_rectangle_colored(mut self, from: Point, to: Point, glyph: impl Into<String>, color: Color) -> Self {
+        self.canvas.draw_rectangle_colored(from, to, glyph, color);
+        self
+    }
+
+    pub fn fill_circle(mut self, center: Point, radius: usize, glyph: impl Into<String>) -> Self {
+        self.canvas.fill_circle(center, radius, glyph);
+        self
+    }
+
+    pub fn fill_circle_colored(mut self, center: Point, radius: usize, glyph: impl Into<String>, color: Color) -> Self {
+        self.canvas.fill_circle_colored(center, radius, glyph, color);
+        self
+    }
+
     pub fn set_pixel(mut self, point: Point, glyph: impl Into<String>) -> Self {
         self.canvas.set_pixel(point, glyph);
+        self
+    }
+
+    pub fn set_pixel_colored(mut self, point: Point, glyph: impl Into<String>, color: Color) -> Self {
+        self.canvas.set_pixel_colored(point, glyph, color);
         self
     }
 
@@ -292,8 +398,8 @@ mod tests {
     #[test]
     fn test_canvas_builder() {
         let canvas = CanvasBuilder::new(10, 10)
-            .set_pixel(Point::new(5, 5), "●")
             .draw_line(Point::new(0, 0), Point::new(5, 5), "•")
+            .set_pixel(Point::new(5, 5), "●")
             .build();
 
         assert_eq!(canvas.get_pixel(Point::new(5, 5)).unwrap().glyph, "●");

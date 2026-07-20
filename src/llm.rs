@@ -144,7 +144,7 @@ pub const THEMES: &[(&str, &str)] = &[
     ),
     (
         "Gridwright (The Deliberate Grid as Craft)",
-        "Pixel-perfect grid art where every cell is a deliberate choice. Use a palette, precise geometric shapes, and mathematical composition. No scaling, no smoothing, no interpolation—just pure, intentional placement on a clean grid. The LLM orchestrates pixel-by-pixel construction using SetPixel, DrawLine, DrawCircle, FillRectangle, and palette color indices.",
+        "Pixel-perfect grid art where every cell is a deliberate choice. Leverages exact coordinate geometry (`vec`), chunky 8-color palettes (`color`), and hard-edge block glyph rendering (`canvas`). Commands include `clear_canvas`, `fill_rectangle`, `draw_rectangle`, `fill_circle`, `draw_circle`, `draw_line_h`, `draw_line_v`, `draw_line_diag`, `draw_path`, and `set_pixel` with 0-indexed palette colors (`color_index: 0..7`) and 2-character wide block glyphs (`██`, `▓▓`, `▒▒`, `░░`) for layered, square-proportional pixel masterpieces.",
     ),
 ];
 
