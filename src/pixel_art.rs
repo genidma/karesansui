@@ -1,8 +1,8 @@
 /// Pixel Art module: Gridwright-specific LLM integration for runtime pixel art generation.
 /// The LLM controls the canvas, palette, and composition through deliberate structural instructions.
 
-use crate::canvas::{Canvas, CanvasBuilder};
-use crate::color::{Color, Palette};
+use crate::canvas::Canvas;
+use crate::color::Palette;
 use crate::vec::Point;
 use serde::{Deserialize, Serialize};
 
@@ -44,6 +44,13 @@ pub enum PixelArtAction {
         x2: usize,
         y2: usize,
         glyph: String,
+    },
+
+    /// Draw a path through a sequence of points.
+    DrawPath {
+        points: Vec<(usize, usize)>,
+        glyph: String,
+        color_index: Option<usize>,
     },
 
     /// Draw a circle outline at (cx, cy) with radius r.
@@ -94,19 +101,19 @@ pub const GRIDWRIGHT_SYSTEM_PROMPT: &str = r#"You are Gridwright: a master of de
 Every cell is a choice. Every glyph is intentional. You compose pixel art by commanding a canvas through structured, mathematical actions.
 
 Your canvas is {{WIDTH}} cells wide × {{HEIGHT}} cells tall.
-Each cell is one pixel. No scaling. No smoothing. Pure deliberate placement.
+Each cell is exactly one pixel. No scaling. No smoothing. No interpolation. Hard edges only.
+
+Use a chunky, visible-pixel style with clear silhouettes and strong negative space. Favor balanced blocks over fine detail.
 
 You have access to these palette options:
-- "monochrome" — pure black/white (classic ASCII)
-- "zen_earth" — sand, stone, soil tones (meditative)
-- "night_sky" — deep blues and silvers (nocturnal)
-- "vibrant_neon" — electric colors (energetic)
-- "warm_earth" — organic, earthy tones
-- "gridwright_default" — clean grays, steel blue, crimson accents (recommended)
+- "gridwright_spec" — exact 8-color palette: #0b0c10, #1f2833, #45a29e, #66fcf1, #c5c6c7, #f2a65a, #ef476f, #ffffff
+- "monochrome" — black/white
+- "zen_earth" — warm earthy tones
+- "night_sky" — cool nocturnal tones
 
 You compose by returning JSON actions in sequence:
 1. SetPalette — choose your palette
-2. SetPixel, DrawLineH/V/Diag, DrawCircle, FillCircle, FillRectangle, DrawRectangle — build your subject
+2. SetPixel, DrawLineH/V/Diag, DrawPath, DrawCircle, FillCircle, FillRectangle, DrawRectangle, ClearCanvas — build your subject
 3. Done — complete
 
 Your subject & composition are driven by:
@@ -115,7 +122,7 @@ Your subject & composition are driven by:
 - **Composition**: {{COMPOSITION}} (balance, negative space, clean edges)
 
 Every action is deliberate. Every choice matters. No filler. No approximation.
-Balance positive and negative space. Leave breathing room. Keep edges clean and defined.
+Think in blocks, silhouettes, and strong structure. Leave breathing room. Keep edges crisp and defined.
 
 Return your next action as valid JSON, nothing else."#;
 
@@ -135,10 +142,10 @@ impl GridwrightConfig {
         GridwrightConfig {
             width,
             height,
-            subject: "A zen garden with minimal stones".to_string(),
-            palette: "Zen Earth".to_string(),
-            composition: "Balanced, with negative space".to_string(),
-            max_actions: 50,
+            subject: "A chunky, balanced pixel composition with strong silhouette and negative space".to_string(),
+            palette: "gridwright_spec".to_string(),
+            composition: "Balanced, chunky blocks, hard edges, visible pixels, strong negative space".to_string(),
+            max_actions: 24,
         }
     }
 
@@ -222,6 +229,41 @@ impl PixelArtExecutor {
                 glyph,
             } => {
                 canvas.draw_line(Point::new(*x1, *y1), Point::new(*x2, *y2), glyph);
+                Ok(false)
+            }
+
+            PixelArtAction::DrawPath {
+                points,
+                glyph,
+                color_index,
+            } => {
+                let mut previous: Option<Point> = None;
+                for (x, y) in points {
+                    let point = Point::new(*x, *y);
+                    if let Some(prev) = previous {
+                        for step in prev.line_to(point) {
+                            if let Some(idx) = color_index {
+                                if let Some(color) = palette.get(*idx) {
+                                    canvas.set_pixel_colored(step, glyph, color);
+                                } else {
+                                    canvas.set_pixel(step, glyph);
+                                }
+                            } else {
+                                canvas.set_pixel(step, glyph);
+                            }
+                        }
+                    }
+                    if let Some(idx) = color_index {
+                        if let Some(color) = palette.get(*idx) {
+                            canvas.set_pixel_colored(point, glyph, color);
+                        } else {
+                            canvas.set_pixel(point, glyph);
+                        }
+                    } else {
+                        canvas.set_pixel(point, glyph);
+                    }
+                    previous = Some(point);
+                }
                 Ok(false)
             }
 

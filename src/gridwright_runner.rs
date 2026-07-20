@@ -3,12 +3,12 @@
 /// and the canvas/color/vec modules for precise, mathematical pixel composition.
 
 use crate::canvas::Canvas;
-use crate::color::{palettes, Color, Palette};
+use crate::color::{palettes, Palette};
 use crate::pixel_art::{GridwrightConfig, PixelArtAction, PixelArtExecutor};
 use anyhow::Result;
 use rand::seq::IndexedRandom;
 use reqwest;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
 use std::time::Duration;
 
@@ -269,7 +269,8 @@ impl GridwrightRunner {
             "night_sky" => palettes::night_sky(),
             "vibrant_neon" => palettes::vibrant_neon(),
             "warm_earth" => palettes::warm_earth(),
-            _ => palettes::gridwright_default(),
+            "gridwright_spec" | "gridwright" | "gridwright_default" | "default" => palettes::gridwright_spec(),
+            _ => palettes::gridwright_spec(),
         }
     }
 
@@ -280,7 +281,7 @@ impl GridwrightRunner {
         let max_x = self.config.width.saturating_sub(1);
         let max_y = self.config.height.saturating_sub(1);
 
-        let choice = rng.random_range(0..7);
+        let choice = rng.random_range(0..8);
         Ok(match choice {
             0 => PixelArtAction::SetPixel {
                 x: rng.random_range(0..max_x),
@@ -315,10 +316,22 @@ impl GridwrightRunner {
                 color_index: Some(rng.random_range(0..2)),
             },
             5 => PixelArtAction::SetPalette {
-                palette_name: ["monochrome", "zen_earth", "night_sky"]
+                palette_name: ["monochrome", "zen_earth", "night_sky", "gridwright_spec"]
                     .choose(&mut rng)
                     .unwrap()
                     .to_string(),
+            },
+            6 => PixelArtAction::DrawPath {
+                points: vec![(2, 2), (6, 5), (10, 3), (13, 8)],
+                glyph: "█".to_string(),
+                color_index: Some(rng.random_range(0..4)),
+            },
+            7 => PixelArtAction::DrawRectangle {
+                x1: 3,
+                y1: 3,
+                x2: 11,
+                y2: 11,
+                glyph: "▓".to_string(),
             },
             _ => PixelArtAction::Done,
         })

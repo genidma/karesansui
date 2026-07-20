@@ -174,20 +174,26 @@ pub mod palettes {
         )
     }
 
-    /// Gridwright's default palette: clean, mathematical, precise.
-    pub fn gridwright_default() -> Palette {
+    /// Gridwright's explicit 16x16 chunky-pixel palette.
+    pub fn gridwright_spec() -> Palette {
         Palette::with_colors(
             "Gridwright",
             vec![
-                Color::new(255, 255, 255), // Pure white (canvas)
-                Color::new(200, 200, 200), // Light gray
-                Color::new(128, 128, 128), // Medium gray
-                Color::new(64, 64, 64),    // Dark gray
-                Color::new(0, 0, 0),       // Black (lines, edges)
-                Color::new(70, 130, 180),  // Steel blue (accent)
-                Color::new(220, 20, 60),   // Crimson red (secondary accent)
+                Color::from_hex("#0b0c10").unwrap(), // Deep space
+                Color::from_hex("#1f2833").unwrap(), // Slate blue
+                Color::from_hex("#45a29e").unwrap(), // Teal
+                Color::from_hex("#66fcf1").unwrap(), // Cyan glow
+                Color::from_hex("#c5c6c7").unwrap(), // Light gray
+                Color::from_hex("#f2a65a").unwrap(), // Warm orange
+                Color::from_hex("#ef476f").unwrap(), // Rose red
+                Color::from_hex("#ffffff").unwrap(), // White
             ],
         )
+    }
+
+    /// Backward-compatible alias for the Gridwright palette.
+    pub fn gridwright_default() -> Palette {
+        gridwright_spec()
     }
 }
 

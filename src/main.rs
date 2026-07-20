@@ -12,7 +12,9 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use clap::Parser;
 use garden::{Action, Garden, GRAVEL, RAKED};
+use gridwright_runner::GridwrightRunner;
 use llm::{Gardener, THEMES};
+use pixel_art::GridwrightConfig;
 
 /// Session duration: 30 minutes per garden before automatic reset.
 const SESSION_DURATION: Duration = Duration::from_secs(30 * 60);
@@ -200,6 +202,13 @@ async fn main() -> Result<()> {
     let model = std::env::var("OPENROUTER_MODEL")
         .unwrap_or_else(|_| "tencent/hy3:free".to_string());
 
+    let gridwright_api_key = if args.dry_run {
+        String::new()
+    } else {
+        std::env::var("OPENROUTER_API_KEY")
+            .map_err(|_| anyhow::anyhow!("OPENROUTER_API_KEY not set (add it to .env)"))?
+    };
+
     let width = args.width;
     let height = args.height;
 
@@ -253,6 +262,27 @@ async fn main() -> Result<()> {
         let border_name = garden.border_pattern.name;
         let is_tabula = gardener.is_tabula_rasa();
         let is_wild = gardener.is_wild_zones();
+
+        if theme.contains("Gridwright") {
+            let config = GridwrightConfig::new(16, 16)
+                .with_subject("A bold, balanced pixel portrait with chunky blocks and strong negative space")
+                .with_palette("gridwright_spec")
+                .with_composition("Balanced, chunky blocks, hard edges, visible pixels, strong negative space")
+                .with_max_actions(20);
+            let runner = GridwrightRunner::new(gridwright_api_key.clone(), model.clone(), config, args.dry_run);
+            let canvas = runner.run().await?;
+            let rendered = if args.no_color {
+                canvas.render()
+            } else {
+                canvas.render_with_colors()
+            };
+            if let Some(snapshot_path) = args.snapshot.as_deref() {
+                std::fs::write(snapshot_path, &rendered)?;
+            }
+            println!("🎨 Gridwright — runtime LLM pixel art\n");
+            println!("{rendered}");
+            return Ok(());
+        }
 
         let mut consecutive_errors = 0;
         let mut border_drawn = is_tabula || is_wild || is_resumed;

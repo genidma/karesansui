@@ -23,8 +23,8 @@ impl Point {
 
     /// Euclidean distance (squared, to avoid floating point).
     pub fn distance_squared(&self, other: Point) -> usize {
-        let dx = (self.x as isize - other.x as isize) as usize;
-        let dy = (self.y as isize - other.y as isize) as usize;
+        let dx = ((self.x as isize - other.x as isize).abs()) as usize;
+        let dy = ((self.y as isize - other.y as isize).abs()) as usize;
         dx * dx + dy * dy
     }
 
