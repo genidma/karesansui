@@ -23,32 +23,42 @@ pub enum Action {
 }
 
 /// Glyphs — each is exactly 2 terminal columns wide for alignment.
-const EMPTY: &str = "  ";
-const BORDER: &str = "🎋";
-const RAKED: &str = "~~";
-const ROCK_S: &str = "🪨";
-const ROCK_M: &str = "🗿";
-const ROCK_L: &str = "🗿";
-const MOSS: &str = "🌿";
-const GRAVEL: &str = "··";
-const FLOWER: &str = "🌸";
-const LANTERN: &str = "🏮";
+pub const EMPTY: &str = "  ";
+pub const BORDER: &str = "🎋";
+pub const RAKED: &str = "~~";
+pub const ROCK_S: &str = "🪨";
+pub const ROCK_M: &str = "🗿";
+pub const ROCK_L: &str = "🗿";
+pub const MOSS: &str = "🌿";
+pub const GRAVEL: &str = "··";
+pub const FLOWER: &str = "🌸";
+pub const LANTERN: &str = "🏮";
 
 /// The ASCII + emoji zen garden grid.
 /// Each cell is a 2-column-wide string so emojis and ASCII mix cleanly.
 pub struct Garden {
     pub width: usize,
     pub height: usize,
-    grid: Vec<Vec<String>>,
+    pub grid: Vec<Vec<String>>,
+    /// Current position of the gardener turtle (x, y).
+    pub turtle_pos: Option<(usize, usize)>,
+    /// Glyph for the turtle (e.g. "🐢" when walking/building, "💤" when resting).
+    pub turtle_glyph: &'static str,
 }
 
 impl Garden {
     pub fn new(width: usize, height: usize) -> Self {
         let grid = vec![vec![EMPTY.to_string(); width]; height];
-        Self { width, height, grid }
+        Self {
+            width,
+            height,
+            grid,
+            turtle_pos: Some((1, 1)),
+            turtle_glyph: "🐢",
+        }
     }
 
-    fn is_empty(&self, x: usize, y: usize) -> bool {
+    pub fn is_empty(&self, x: usize, y: usize) -> bool {
         self.grid[y][x] == EMPTY
     }
 
@@ -126,11 +136,18 @@ impl Garden {
         }
     }
 
-    /// Render the garden to a string for terminal display.
+    /// Render the garden to a string for terminal display, showing the turtle
+    /// right at its current location.
     pub fn render(&self) -> String {
         let mut out = String::new();
-        for row in &self.grid {
-            for cell in row {
+        for (y, row) in self.grid.iter().enumerate() {
+            for (x, cell) in row.iter().enumerate() {
+                if let Some((tx, ty)) = self.turtle_pos {
+                    if x == tx && y == ty {
+                        out.push_str(self.turtle_glyph);
+                        continue;
+                    }
+                }
                 out.push_str(cell);
             }
             out.push('\n');
