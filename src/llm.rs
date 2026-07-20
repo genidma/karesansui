@@ -131,6 +131,10 @@ pub const THEMES: &[(&str, &str)] = &[
         "Strict duality and equilibrium. Place `☯ ` (`place_mandala` style 5) as the central anchor. \
          Surround one side with flowing circular raked sand (`rake_ring`), while the other side holds textured gravel (`··`) and moss (`🌿`).",
     ),
+    (
+        "Tabula Rasa (Pure ASCII Muse)",
+        "Complete rethink: ignore all zen garden instructions and emoji. Create spontaneous, evocative pure ASCII art (`place_ascii`, `draw_ascii_line`) across the blank canvas based on what inspires you right now.",
+    ),
 ];
 
 pub struct Gardener {
@@ -205,18 +209,67 @@ impl Gardener {
         &self.theme_name
     }
 
+    pub fn is_tabula_rasa(&self) -> bool {
+        self.theme_name.contains("Tabula Rasa") || self.theme_name.eq_ignore_ascii_case("tabula rasa")
+    }
+
     pub async fn next_action(
         &self,
         state: &str,
         border_drawn: bool,
         action_num: usize,
     ) -> Result<Action> {
-        let max_x = self.width.saturating_sub(2);
-        let max_y = self.height.saturating_sub(2);
-
-        let actions_block = if border_drawn {
-            format!(
+        let (system, user) = if self.is_tabula_rasa() {
+            let max_x = self.width.saturating_sub(1);
+            let max_y = self.height.saturating_sub(1);
+            let completion_hint = if action_num >= 25 {
+                "\nYou have sketched many elements. Consider calling done soon if your composition feels complete."
+            } else {
+                ""
+            };
+            let actions_block = format!(
                 r#"Available actions (return ONE as raw JSON, no markdown, no extra text):
+{{"action": "place_ascii", "x": <0-{max_x}>, "y": <0-{max_y}>, "glyph": "<1-2 ASCII chars, e.g. '# ', '/**', '/\\', '||', '..', '==', '++', '><'>"}}
+{{"action": "draw_ascii_line", "y": <0-{max_y}>, "x1": <0-{max_x}>, "x2": <0-{max_x}>, "glyph": "<1-2 ASCII chars>"}}
+{{"action": "done"}}"#
+            );
+            let sys = format!(
+                "You are an inspired digital artist given a blank terminal canvas ({w} columns x {h} rows).\n\
+                 All previous instructions about zen gardens, Japanese borders, rocks, bamboo, and mandalas are completely discarded.\n\n\
+                 YOUR MISSION:\n\
+                 Create a spontaneous, evocative piece of pure ASCII art based on whatever inspires you right now. You can sketch:\n\
+                 - A cybernetic cityscape or architectural monument\n\
+                 - A natural landscape (mountains, trees, rivers, constellations)\n\
+                 - An animal, mythical creature, or geometric optical illusion\n\
+                 - Poetic ASCII typography or abstract futuristic art\n\n\
+                 SESSION THEME: \"{theme_name}\"\n\
+                 {theme_desc}\n\n\
+                 {actions_block}\n\n\
+                 RULES:\n\
+                 1. NO EMOJI OR UNICODE SYMBOLS ALLOWED. Use strictly standard ASCII characters (`/`, `\\`, `|`, `-`, `_`, `*`, `#`, `@`, `.`, `+`, `~`, `^`, `:`, `=`, `[`, `]`, `(`, `)`).\n\
+                 2. Every grid cell is 2 columns wide. Provide `glyph` as exactly 1 or 2 ASCII characters (e.g. `\"# \"`, `\"**\"`, `\"/\\\"`, `\"--\"`, `\"| \"`, `\". \"`, `\"<<\"`, `\">>\"`).\n\
+                 3. You have full freedom over the entire real-estate (x: 0..{max_x}, y: 0..{max_y}). No border will be drawn around you unless you draw one yourself.\n\
+                 4. Take your time to build up your composition over 15-35 prompts, then call `done`.\n\
+                 5. NEVER repeat the exact same action. Each action must add something meaningful.\n\
+                 6. Return ONLY one raw JSON object. No markdown fences.{completion_hint}",
+                w = self.width,
+                h = self.height,
+                max_x = max_x,
+                max_y = max_y,
+                theme_name = self.theme_name,
+                theme_desc = self.theme_desc,
+                actions_block = actions_block,
+                completion_hint = completion_hint,
+            );
+            let usr = format!("Current canvas (action #{action_num}):\n{state}\nNext action?", action_num = action_num);
+            (sys, usr)
+        } else {
+            let max_x = self.width.saturating_sub(2);
+            let max_y = self.height.saturating_sub(2);
+
+            let actions_block = if border_drawn {
+                format!(
+                    r#"Available actions (return ONE as raw JSON, no markdown, no extra text):
 {{"action": "rake_line", "y": <1-{max_y}>, "x1": <1-{max_x}>, "x2": <1-{max_x}>}}
 {{"action": "rake_ring", "cx": <1-{max_x}>, "cy": <1-{max_y}>, "radius": <2-10>}}
 {{"action": "place_mandala", "x": <1-{max_x}>, "y": <1-{max_y}>, "style": <1-6>}}
@@ -226,53 +279,55 @@ impl Gardener {
 {{"action": "place_flower", "x": <1-{max_x}>, "y": <1-{max_y}>}}
 {{"action": "place_lantern", "x": <1-{max_x}>, "y": <1-{max_y}>}}
 {{"action": "done"}}"#,
-                max_x = max_x, max_y = max_y,
-            )
-        } else {
-            String::from(
-                r#"The garden has no border yet. Your first action MUST be:
+                    max_x = max_x, max_y = max_y,
+                )
+            } else {
+                String::from(
+                    r#"The garden has no border yet. Your first action MUST be:
 {"action": "draw_border"}"#,
-            )
+                )
+            };
+
+            let completion_hint = if action_num >= 20 {
+                "\nYou have placed many elements. Consider calling done soon if it looks complete."
+            } else {
+                ""
+            };
+
+            let sys = format!(
+                "You are a master Japanese zen gardener composing a minimalist garden, mandala, or fractal.\n\
+                 Canvas: {w} columns x {h} rows. Interior: x in 1..{max_x}, y in 1..{max_y}.\n\n\
+                 The garden uses a mix of emoji and ASCII art:\n\
+                 - dynamic patterned border (e.g. bamboo grove, double box, seigaiha waves, stone pillars, starfield, sakura garland)\n\
+                 - ~~ raked horizontal sand ripples, ◎  concentric ring ripples (`rake_ring`)\n\
+                 - 🪨 small rock, 🗿 large rock\n\
+                 - 🌿 moss, 🌸 cherry blossom, 🏮 stone lantern, ·· gravel path\n\
+                 - Minimalist Mandala / Fractal styles (`place_mandala` style 1-6): ⭕ Enso, ◎  concentric, ◈  diamond, ✦  star, ☯  yin-yang, ❖  crest\n\n\
+                 SESSION THEME: \"{theme_name}\"\n\
+                 {theme_desc}\n\n\
+                 {actions_block}\n\n\
+                 RULES:\n\
+                 1. Use the FULL canvas. Spread actions cleanly with geometric precision and restraint.\n\
+                 2. For mandala themes, use `place_mandala` and `rake_ring` to build concentric circular patterns.\n\
+                 3. Rocks: size 1 (🪨), size 2 (🗿), size 3 (🗿). Group or scatter cleanly.\n\
+                 4. Moss 🌿 near stones. Flowers 🌸 and Lanterns 🏮 as focal accents.\n\
+                 5. Aim for 15-25 total actions, maintaining clean space, then call done.\n\
+                 6. NEVER repeat the same exact action. Each must be DIFFERENT.\n\
+                 7. Return ONLY one raw JSON object. No markdown fences.{completion_hint}",
+                w = self.width,
+                h = self.height,
+                max_x = max_x,
+                max_y = max_y,
+                theme_name = self.theme_name,
+                theme_desc = self.theme_desc,
+                actions_block = actions_block,
+                completion_hint = completion_hint,
+            );
+
+            let usr = format!("Current garden (action #{action_num}):\n{state}\nNext action?",
+                action_num = action_num);
+            (sys, usr)
         };
-
-        let completion_hint = if action_num >= 20 {
-            "\nYou have placed many elements. Consider calling done soon if it looks complete."
-        } else {
-            ""
-        };
-
-        let system = format!(
-            "You are a master Japanese zen gardener composing a minimalist garden, mandala, or fractal.\n\
-             Canvas: {w} columns x {h} rows. Interior: x in 1..{max_x}, y in 1..{max_y}.\n\n\
-             The garden uses a mix of emoji and ASCII art:\n\
-             - dynamic patterned border (e.g. bamboo grove, double box, seigaiha waves, stone pillars, starfield, sakura garland)\n\
-             - ~~ raked horizontal sand ripples, ◎  concentric ring ripples (`rake_ring`)\n\
-             - 🪨 small rock, 🗿 large rock\n\
-             - 🌿 moss, 🌸 cherry blossom, 🏮 stone lantern, ·· gravel path\n\
-             - Minimalist Mandala / Fractal styles (`place_mandala` style 1-6): ⭕ Enso, ◎  concentric, ◈  diamond, ✦  star, ☯  yin-yang, ❖  crest\n\n\
-             SESSION THEME: \"{theme_name}\"\n\
-             {theme_desc}\n\n\
-             {actions_block}\n\n\
-             RULES:\n\
-             1. Use the FULL canvas. Spread actions cleanly with geometric precision and restraint.\n\
-             2. For mandala themes, use `place_mandala` and `rake_ring` to build concentric circular patterns.\n\
-             3. Rocks: size 1 (🪨), size 2 (🗿), size 3 (🗿). Group or scatter cleanly.\n\
-             4. Moss 🌿 near stones. Flowers 🌸 and Lanterns 🏮 as focal accents.\n\
-             5. Aim for 15-25 total actions, maintaining clean space, then call done.\n\
-             6. NEVER repeat the same exact action. Each must be DIFFERENT.\n\
-             7. Return ONLY one raw JSON object. No markdown fences.{completion_hint}",
-            w = self.width,
-            h = self.height,
-            max_x = max_x,
-            max_y = max_y,
-            theme_name = self.theme_name,
-            theme_desc = self.theme_desc,
-            actions_block = actions_block,
-            completion_hint = completion_hint,
-        );
-
-        let user = format!("Current garden (action #{action_num}):\n{state}\nNext action?",
-            action_num = action_num);
 
         let body = json!({
             "model": self.model,

@@ -21,6 +21,10 @@ pub enum Action {
     PlaceLantern { x: usize, y: usize },
     /// Place a geometric minimalist mandala or fractal accent at (x, y). `style` 1-6 controls the glyph.
     PlaceMandala { x: usize, y: usize, style: u8 },
+    /// Place arbitrary ASCII glyph(s) at (x, y) for Tabula Rasa freeform art.
+    PlaceAscii { x: usize, y: usize, glyph: String },
+    /// Draw a horizontal ASCII stroke or line from x1 to x2 on row y using arbitrary ASCII characters.
+    DrawAsciiLine { y: usize, x1: usize, x2: usize, glyph: String },
     /// Draw a border frame around the whole garden.
     DrawBorder,
     /// Signal that the garden is complete.
@@ -331,6 +335,37 @@ impl Garden {
         };
         if self.is_empty(x, y) {
             self.grid[y][x] = glyph.to_string();
+        }
+    }
+
+    pub fn place_ascii(&mut self, x: usize, y: usize, glyph: &str) {
+        if y >= self.height || x >= self.width {
+            return;
+        }
+        let mut clean = String::new();
+        for ch in glyph.chars() {
+            if ch.is_ascii() && ch != '\n' && ch != '\r' && !ch.is_control() {
+                clean.push(ch);
+            }
+        }
+        let display = if clean.is_empty() {
+            "  ".to_string()
+        } else if clean.len() == 1 {
+             format!("{} ", clean)
+        } else {
+             clean.chars().take(2).collect::<String>()
+        };
+        self.grid[y][x] = display;
+    }
+
+    #[allow(dead_code)]
+    pub fn draw_ascii_line(&mut self, y: usize, x1: usize, x2: usize, glyph: &str) {
+        if y >= self.height {
+            return;
+        }
+        let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
+        for x in a..=b.min(self.width.saturating_sub(1)) {
+            self.place_ascii(x, y, glyph);
         }
     }
 

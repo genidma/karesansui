@@ -154,19 +154,33 @@ async fn main() -> Result<()> {
         let gardener = Gardener::new(&model, width, height, args.theme.as_deref())?;
         let theme = gardener.theme_name().to_string();
         let border_name = garden.border_pattern.name;
+        let is_tabula = gardener.is_tabula_rasa();
 
         let mut consecutive_errors = 0;
-        let mut border_drawn = false;
+        let mut border_drawn = is_tabula;
         let mut prompt_count: usize = 0;
 
+        if is_tabula {
+            garden.turtle_glyph = "[*]";
+        }
+
         println!("\x1b[2J\x1b[H");
-        println!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"\n");
-        println!("   🐢 The turtle is waking up to tend the garden...\n");
+        if is_tabula {
+            println!("✨ Tabula Rasa — Theme: \"{theme}\"\n");
+            println!("   [*] The ASCII muse is waking up to sketch across the canvas...\n");
+        } else {
+            println!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"\n");
+            println!("   🐢 The turtle is waking up to tend the garden...\n");
+        }
         tokio::time::sleep(Duration::from_secs(2)).await;
 
         while session_start.elapsed() < SESSION_DURATION {
             let state = garden.render();
-            let header = format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  [prompt #{prompt_count}]");
+            let header = if is_tabula {
+                format!("✨ Tabula Rasa — Theme: \"{theme}\"  [prompt #{prompt_count}]")
+            } else {
+                format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  [prompt #{prompt_count}]")
+            };
             print!("\x1b[2J\x1b[H{header}\n\n{state}");
             std::io::Write::flush(&mut std::io::stdout())?;
 
@@ -192,7 +206,11 @@ async fn main() -> Result<()> {
             }
 
             prompt_count += 1;
-            let header = format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  [prompt #{prompt_count} — 🐢 building...]");
+            let header = if is_tabula {
+                format!("✨ Tabula Rasa — Theme: \"{theme}\"  [prompt #{prompt_count} — [*] sketching...]")
+            } else {
+                format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  [prompt #{prompt_count} — 🐢 building...]")
+            };
 
             match action {
                 Action::DrawBorder => {
@@ -263,6 +281,29 @@ async fn main() -> Result<()> {
                     std::io::Write::flush(&mut std::io::stdout())?;
                     tokio::time::sleep(Duration::from_millis(500)).await;
                 }
+                Action::PlaceAscii { x, y, glyph } => {
+                    animate_walk(&mut garden, x, y, &header).await?;
+                    garden.place_ascii(x, y, &glyph);
+                    print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
+                    std::io::Write::flush(&mut std::io::stdout())?;
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                Action::DrawAsciiLine { y, x1, x2, glyph } => {
+                    animate_walk(&mut garden, x1, y, &header).await?;
+                    let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
+                    let step_range: Vec<usize> = if x1 <= x2 {
+                        (a..=b.min(width.saturating_sub(1))).collect()
+                    } else {
+                        (a..=b.min(width.saturating_sub(1))).rev().collect()
+                    };
+                    for x in step_range {
+                        garden.turtle_pos = Some((x, y));
+                        garden.place_ascii(x, y, &glyph);
+                        print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
+                        std::io::Write::flush(&mut std::io::stdout())?;
+                        tokio::time::sleep(Duration::from_millis(120)).await;
+                    }
+                }
                 Action::RakeLine { y, x1, x2 } => {
                     animate_walk(&mut garden, x1, y, &header).await?;
                     let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
@@ -315,9 +356,13 @@ async fn main() -> Result<()> {
                     }
                 }
                 Action::Done => {
-                    garden.turtle_glyph = "💤";
+                    garden.turtle_glyph = if is_tabula { "[z]" } else { "💤" };
                     for remaining in (1..=20).rev() {
-                        let h = format!("🌿 karesansui — \"{theme}\" | Border: \"{border_name}\" — Complete! 💤 admiring ({remaining}s until reset)");
+                        let h = if is_tabula {
+                            format!("✨ Tabula Rasa — \"{theme}\" — Complete! [z] admiring ({remaining}s until reset)")
+                        } else {
+                            format!("🌿 karesansui — \"{theme}\" | Border: \"{border_name}\" — Complete! 💤 admiring ({remaining}s until reset)")
+                        };
                         print!("\x1b[2J\x1b[H{h}\n\n{}", garden.render());
                         std::io::Write::flush(&mut std::io::stdout())?;
                         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -328,22 +373,26 @@ async fn main() -> Result<()> {
 
             // Rate limiting & pacing between prompts:
             let wait_secs = if prompt_count % 10 == 0 { rest } else { pace };
-            garden.turtle_glyph = "💤";
+            garden.turtle_glyph = if is_tabula { "[z]" } else { "💤" };
             for remaining in (1..=wait_secs).rev() {
                 if session_start.elapsed() >= SESSION_DURATION {
                     break;
                 }
                 let status = if prompt_count % 10 == 0 {
-                    format!("[prompt #{prompt_count} — 💤 resting {rest}s rate-limit pause: {remaining}s remaining]")
+                    format!("[prompt #{prompt_count} — {} resting {rest}s rate-limit pause: {remaining}s remaining]", if is_tabula { "[z]" } else { "💤" })
                 } else {
-                    format!("[prompt #{prompt_count} — 💤 resting: {remaining}s until next move]")
+                    format!("[prompt #{prompt_count} — {} resting: {remaining}s until next move]", if is_tabula { "[z]" } else { "💤" })
                 };
-                let h = format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  {status}");
+                let h = if is_tabula {
+                    format!("✨ Tabula Rasa — Theme: \"{theme}\"  {status}")
+                } else {
+                    format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  {status}")
+                };
                 print!("\x1b[2J\x1b[H{h}\n\n{}", garden.render());
                 std::io::Write::flush(&mut std::io::stdout())?;
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
-            garden.turtle_glyph = "🐢";
+            garden.turtle_glyph = if is_tabula { "[*]" } else { "🐢" };
         }
 
         println!("\x1b[2J\x1b[H");
