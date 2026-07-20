@@ -245,7 +245,7 @@ impl Gardener {
             "You are a master Japanese zen gardener composing a minimalist garden, mandala, or fractal.\n\
              Canvas: {w} columns x {h} rows. Interior: x in 1..{max_x}, y in 1..{max_y}.\n\n\
              The garden uses a mix of emoji and ASCII art:\n\
-             - 🎋 bamboo border\n\
+             - dynamic patterned border (e.g. bamboo grove, double box, seigaiha waves, stone pillars, starfield, sakura garland)\n\
              - ~~ raked horizontal sand ripples, ◎  concentric ring ripples (`rake_ring`)\n\
              - 🪨 small rock, 🗿 large rock\n\
              - 🌿 moss, 🌸 cherry blossom, 🏮 stone lantern, ·· gravel path\n\

@@ -1,3 +1,4 @@
+use rand::seq::IndexedRandom;
 use serde::{Deserialize, Serialize};
 
 /// A single gardener action returned by the LLM.
@@ -46,6 +47,111 @@ pub const FRACTAL_STAR: &str = "✦ ";
 pub const YIN_YANG: &str = "☯ ";
 pub const CREST: &str = "❖ ";
 
+/// A geometric, patterned, and aesthetically pleasing border style.
+#[derive(Debug, Clone)]
+pub struct BorderPattern {
+    pub name: &'static str,
+    pub top_left: &'static str,
+    pub top_right: &'static str,
+    pub bottom_left: &'static str,
+    pub bottom_right: &'static str,
+    pub top: &'static str,
+    pub top_alt: &'static str,
+    pub bottom: &'static str,
+    pub bottom_alt: &'static str,
+    pub left: &'static str,
+    pub left_alt: &'static str,
+    pub right: &'static str,
+    pub right_alt: &'static str,
+}
+
+pub const BORDER_PATTERNS: &[BorderPattern] = &[
+    // 1. Classic Bamboo & Kadomatsu Grove
+    BorderPattern {
+        name: "Kadomatsu Bamboo Grove",
+        top_left: "🎍", top_right: "🎍", bottom_left: "🎍", bottom_right: "🎍",
+        top: "🎋", top_alt: "──", bottom: "🎋", bottom_alt: "──",
+        left: "│ ", left_alt: "🎋", right: "│ ", right_alt: "🎋",
+    },
+    // 2. Sacred Double Box
+    BorderPattern {
+        name: "Sacred Double Box",
+        top_left: "╔═", top_right: "═╗", bottom_left: "╚═", bottom_right: "═╝",
+        top: "══", top_alt: "══", bottom: "══", bottom_alt: "══",
+        left: "║ ", left_alt: "║ ", right: "║ ", right_alt: "║ ",
+    },
+    // 3. Mandala Diamond Lattice
+    BorderPattern {
+        name: "Mandala Diamond Lattice",
+        top_left: "◈ ", top_right: "◈ ", bottom_left: "◈ ", bottom_right: "◈ ",
+        top: "◇ ", top_alt: "◈ ", bottom: "◇ ", bottom_alt: "◈ ",
+        left: "◇ ", left_alt: "◈ ", right: "◇ ", right_alt: "◈ ",
+    },
+    // 4. Seigaiha Ocean Waves
+    BorderPattern {
+        name: "Seigaiha Ocean Waves",
+        top_left: "🌊", top_right: "🌊", bottom_left: "🌊", bottom_right: "🌊",
+        top: "〰〰", top_alt: "≈≈", bottom: "〰〰", bottom_alt: "≈≈",
+        left: "≈≈", left_alt: "〰 ", right: "≈≈", right_alt: "〰 ",
+    },
+    // 5. Stone Pillar & Gravel Shore
+    BorderPattern {
+        name: "Stone Pillar & Gravel Shore",
+        top_left: "⛩️ ", top_right: "⛩️ ", bottom_left: "🗿", bottom_right: "🗿",
+        top: "🪨", top_alt: "··", bottom: "🪨", bottom_alt: "··",
+        left: "║ ", left_alt: "🪨", right: "║ ", right_alt: "🪨",
+    },
+    // 6. Starfield Lattice
+    BorderPattern {
+        name: "Starfield Lattice",
+        top_left: "🌟", top_right: "🌟", bottom_left: "🌟", bottom_right: "🌟",
+        top: "✦ ", top_alt: "✧ ", bottom: "✦ ", bottom_alt: "✧ ",
+        left: "✦ ", left_alt: "✧ ", right: "✦ ", right_alt: "✧ ",
+    },
+    // 7. Enso Yin-Yang Harmony
+    BorderPattern {
+        name: "Enso Yin-Yang Harmony",
+        top_left: "⭕", top_right: "⭕", bottom_left: "⭕", bottom_right: "⭕",
+        top: "──", top_alt: "☯ ", bottom: "──", bottom_alt: "☯ ",
+        left: "│ ", left_alt: "│ ", right: "│ ", right_alt: "│ ",
+    },
+    // 8. Sakura Blossom Garland
+    BorderPattern {
+        name: "Sakura Blossom Garland",
+        top_left: "🌸", top_right: "🌸", bottom_left: "🌸", bottom_right: "🌸",
+        top: "──", top_alt: "🌸", bottom: "──", bottom_alt: "🌸",
+        left: "│ ", left_alt: "🌸", right: "│ ", right_alt: "🌸",
+    },
+    // 9. Engawa Wooden Deck
+    BorderPattern {
+        name: "Engawa Wooden Deck",
+        top_left: "+-", top_right: "-+", bottom_left: "+-", bottom_right: "-+",
+        top: "--", top_alt: "==", bottom: "--", bottom_alt: "==",
+        left: "| ", left_alt: "| ", right: "| ", right_alt: "| ",
+    },
+    // 10. Zen Gravel Ridge
+    BorderPattern {
+        name: "Zen Gravel Ridge",
+        top_left: "░░", top_right: "░░", bottom_left: "░░", bottom_right: "░░",
+        top: "▒▒", top_alt: "░░", bottom: "▒▒", bottom_alt: "░░",
+        left: "▒▒", left_alt: "░░", right: "▒▒", right_alt: "░░",
+    },
+    // 11. Minimalist Dotted Lattice
+    BorderPattern {
+        name: "Minimalist Dotted Lattice",
+        top_left: "+-", top_right: "-+", bottom_left: "+-", bottom_right: "-+",
+        top: "· ", top_alt: "- ", bottom: "· ", bottom_alt: "- ",
+        left: ": ", left_alt: "| ", right: ": ", right_alt: "| ",
+    },
+    // 12. Shimenawa Sacred Rope
+    BorderPattern {
+        name: "Shimenawa Sacred Rope",
+        top_left: "❖ ", top_right: "❖ ", bottom_left: "❖ ", bottom_right: "❖ ",
+        top: "≈≈", top_alt: "──", bottom: "≈≈", bottom_alt: "──",
+        left: "│ ", left_alt: "≈≈", right: "│ ", right_alt: "≈≈",
+    },
+];
+
 /// The ASCII + emoji zen garden grid.
 /// Each cell is a 2-column-wide string so emojis and ASCII mix cleanly.
 pub struct Garden {
@@ -56,22 +162,62 @@ pub struct Garden {
     pub turtle_pos: Option<(usize, usize)>,
     /// Glyph for the turtle (e.g. "🐢" when walking/building, "💤" when resting).
     pub turtle_glyph: &'static str,
+    /// The aesthetic border pattern framing this session's garden.
+    pub border_pattern: BorderPattern,
 }
 
 impl Garden {
     pub fn new(width: usize, height: usize) -> Self {
         let grid = vec![vec![EMPTY.to_string(); width]; height];
+        let mut rng = rand::rng();
+        let border_pattern = BORDER_PATTERNS.choose(&mut rng).unwrap().clone();
         Self {
             width,
             height,
             grid,
             turtle_pos: Some((1, 1)),
             turtle_glyph: "🐢",
+            border_pattern,
         }
     }
 
     pub fn is_empty(&self, x: usize, y: usize) -> bool {
         self.grid[y][x] == EMPTY
+    }
+
+    pub fn border_glyph_for(&self, x: usize, y: usize) -> &str {
+        let w = self.width.saturating_sub(1);
+        let h = self.height.saturating_sub(1);
+        let p = &self.border_pattern;
+        if x == 0 && y == 0 {
+            p.top_left
+        } else if x == w && y == 0 {
+            p.top_right
+        } else if x == 0 && y == h {
+            p.bottom_left
+        } else if x == w && y == h {
+            p.bottom_right
+        } else if y == 0 {
+            if x % 2 == 0 { p.top } else { p.top_alt }
+        } else if y == h {
+            if x % 2 == 0 { p.bottom } else { p.bottom_alt }
+        } else if x == 0 {
+            if y % 2 == 0 { p.left } else { p.left_alt }
+        } else if x == w {
+            if y % 2 == 0 { p.right } else { p.right_alt }
+        } else {
+            EMPTY
+        }
+    }
+
+    pub fn draw_border_at(&mut self, x: usize, y: usize) {
+        if y >= self.height || x >= self.width {
+            return;
+        }
+        let glyph = self.border_glyph_for(x, y);
+        if glyph != EMPTY {
+            self.grid[y][x] = glyph.to_string();
+        }
     }
 
     pub fn place_rock(&mut self, x: usize, y: usize, size: u8) {
@@ -190,12 +336,12 @@ impl Garden {
     #[allow(dead_code)]
     pub fn draw_border(&mut self) {
         for x in 0..self.width {
-            self.grid[0][x] = BORDER.to_string();
-            self.grid[self.height - 1][x] = BORDER.to_string();
+            self.draw_border_at(x, 0);
+            self.draw_border_at(x, self.height.saturating_sub(1));
         }
         for y in 0..self.height {
-            self.grid[y][0] = BORDER.to_string();
-            self.grid[y][self.width - 1] = BORDER.to_string();
+            self.draw_border_at(0, y);
+            self.draw_border_at(self.width.saturating_sub(1), y);
         }
     }
 

@@ -26,11 +26,12 @@ and *Enso Fractal Solitude* — each guiding the LLM toward a distinct compositi
   - Added the **animated turtle (`🐢`)** that pathfinds across the grid to place items and rests (`💤`) between turns.
   - Implemented **rate-limiting pacing & session cycles** (6s pace between prompts, 30s rest every 10 prompts, 30-minute auto-reset loop).
   - Added **minimalist ASCII/emoji mandala & fractal actions** (`place_mandala`, `rake_ring`) and 5 new geometric themes.
+  - Implemented **Dynamic Patterned Borders**: Each session is framed by one of **12 unique, aesthetically pleasing border patterns** (*Sacred Double Box*, *Seigaiha Ocean Waves*, *Sakura Blossom Garland*, *Starfield Lattice*, *Shimenawa Sacred Rope*, etc.) laid down by the turtle during the opening perimeter walk.
   - Built **interactive startup menu (`-i`)** and full **CLI command option weaving (`clap`)**.
 
 ## How it works
 
-- A `Garden` grid holds 2-column wide strings so emoji and ASCII align cleanly: empty sand (`  `), raked lines (`~~`), circular concentric ripples (`◎ `), rocks (`🪨`, `🗿`), moss (`🌿`), gravel (`··`), flowers (`🌸`), lanterns (`🏮`), bamboo borders (`🎋`), and mandala symbols (`⭕`, `◈ `, `✦ `, `☯ `, `❖ `).
+- A `Garden` grid holds 2-column wide strings so emoji and ASCII align cleanly: empty sand (`  `), raked lines (`~~`), circular concentric ripples (`◎ `), rocks (`🪨`, `🗿`), moss (`🌿`), gravel (`··`), flowers (`🌸`), lanterns (`🏮`), dynamic borders (`🎋`, `═╗`, `🌊`, `🌸`, `❖ `), and mandala symbols (`⭕`, `◈ `, `✦ `, `☯ `, `❖ `).
 - On startup, a **theme** is selected (or chosen by you via CLI/interactive menu) and injected into the LLM system prompt.
 - Every turn, the LLM inspects the exact visual state of the garden and returns a structured JSON action.
 - The turtle (`🐢`) animates step-by-step to the destination coordinates (`animate_walk`) and applies the change.
@@ -134,6 +135,6 @@ In addition to `.env`, grid size (`--width`/`--height`), pacing (`--pace`), and 
 
 ## Layout
 
-- `src/garden.rs` — `Garden` grid, `Action` enum (including `RakeRing` & `PlaceMandala`), turtle pathfinding, and 2-column glyph definitions.
+- `src/garden.rs` — `Garden` grid, `BorderPattern` (12 dynamic geometric/aesthetic border styles), `Action` enum (including `RakeRing` & `PlaceMandala`), turtle pathfinding, and 2-column glyph definitions.
 - `src/llm.rs` — OpenRouter client, 17-theme pool, free-model enforcement, and dynamic prompt engineering.
 - `src/main.rs` — CLI parser (`clap`), interactive terminal menu (`-i`), slow turtle animation loop (`animate_walk`), and 30-minute session lifecycle.

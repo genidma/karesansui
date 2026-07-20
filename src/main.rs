@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use clap::Parser;
-use garden::{Action, Garden, BORDER, GRAVEL, RAKED};
+use garden::{Action, Garden, GRAVEL, RAKED};
 use llm::{Gardener, THEMES};
 
 /// Session duration: 30 minutes per garden before automatic reset.
@@ -153,19 +153,20 @@ async fn main() -> Result<()> {
         let mut garden = Garden::new(width, height);
         let gardener = Gardener::new(&model, width, height, args.theme.as_deref())?;
         let theme = gardener.theme_name().to_string();
+        let border_name = garden.border_pattern.name;
 
         let mut consecutive_errors = 0;
         let mut border_drawn = false;
         let mut prompt_count: usize = 0;
 
         println!("\x1b[2J\x1b[H");
-        println!("🌿 karesansui — Theme: \"{theme}\"\n");
+        println!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"\n");
         println!("   🐢 The turtle is waking up to tend the garden...\n");
         tokio::time::sleep(Duration::from_secs(2)).await;
 
         while session_start.elapsed() < SESSION_DURATION {
             let state = garden.render();
-            let header = format!("🌿 karesansui — Theme: \"{theme}\"  [prompt #{prompt_count}]");
+            let header = format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  [prompt #{prompt_count}]");
             print!("\x1b[2J\x1b[H{header}\n\n{state}");
             std::io::Write::flush(&mut std::io::stdout())?;
 
@@ -191,34 +192,34 @@ async fn main() -> Result<()> {
             }
 
             prompt_count += 1;
-            let header = format!("🌿 karesansui — Theme: \"{theme}\"  [prompt #{prompt_count} — 🐢 building...]");
+            let header = format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  [prompt #{prompt_count} — 🐢 building...]");
 
             match action {
                 Action::DrawBorder => {
-                    // Turtle walks around the perimeter laying bamboo frame.
+                    // Turtle walks around the perimeter laying the pattern-based border.
                     for x in 0..width {
-                        garden.grid[0][x] = BORDER.to_string();
+                        garden.draw_border_at(x, 0);
                         garden.turtle_pos = Some((x, 0));
                         print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
                         std::io::Write::flush(&mut std::io::stdout())?;
                         tokio::time::sleep(Duration::from_millis(30)).await;
                     }
                     for y in 0..height {
-                        garden.grid[y][width - 1] = BORDER.to_string();
+                        garden.draw_border_at(width - 1, y);
                         garden.turtle_pos = Some((width - 1, y));
                         print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
                         std::io::Write::flush(&mut std::io::stdout())?;
                         tokio::time::sleep(Duration::from_millis(30)).await;
                     }
                     for x in (0..width).rev() {
-                        garden.grid[height - 1][x] = BORDER.to_string();
+                        garden.draw_border_at(x, height - 1);
                         garden.turtle_pos = Some((x, height - 1));
                         print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
                         std::io::Write::flush(&mut std::io::stdout())?;
                         tokio::time::sleep(Duration::from_millis(30)).await;
                     }
                     for y in (0..height).rev() {
-                        garden.grid[y][0] = BORDER.to_string();
+                        garden.draw_border_at(0, y);
                         garden.turtle_pos = Some((0, y));
                         print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
                         std::io::Write::flush(&mut std::io::stdout())?;
@@ -316,7 +317,7 @@ async fn main() -> Result<()> {
                 Action::Done => {
                     garden.turtle_glyph = "💤";
                     for remaining in (1..=20).rev() {
-                        let h = format!("🌿 karesansui — \"{theme}\" — Complete! 💤 admiring ({remaining}s until reset)");
+                        let h = format!("🌿 karesansui — \"{theme}\" | Border: \"{border_name}\" — Complete! 💤 admiring ({remaining}s until reset)");
                         print!("\x1b[2J\x1b[H{h}\n\n{}", garden.render());
                         std::io::Write::flush(&mut std::io::stdout())?;
                         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -337,7 +338,7 @@ async fn main() -> Result<()> {
                 } else {
                     format!("[prompt #{prompt_count} — 💤 resting: {remaining}s until next move]")
                 };
-                let h = format!("🌿 karesansui — Theme: \"{theme}\"  {status}");
+                let h = format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  {status}");
                 print!("\x1b[2J\x1b[H{h}\n\n{}", garden.render());
                 std::io::Write::flush(&mut std::io::stdout())?;
                 tokio::time::sleep(Duration::from_secs(1)).await;
