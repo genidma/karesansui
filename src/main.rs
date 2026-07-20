@@ -163,6 +163,8 @@ async fn main() -> Result<()> {
 
         if is_tabula {
             garden.turtle_glyph = "[*]";
+        } else if is_wild {
+            garden.turtle_glyph = "🕊️";
         }
 
         println!("\x1b[2J\x1b[H");
@@ -171,7 +173,7 @@ async fn main() -> Result<()> {
             println!("   [*] The ASCII muse is waking up to sketch across the canvas...\n");
         } else if is_wild {
             println!("🌊 Wild Zones — Theme: \"{theme}\"\n");
-            println!("   🐢 The turtle enters the unbound zone of absolute freedom and serenity...\n");
+            println!("   🕊️ The dove of peace enters the unbound zone of absolute freedom and serenity...\n");
         } else {
             println!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"\n");
             println!("   🐢 The turtle is waking up to tend the garden...\n");
@@ -215,7 +217,7 @@ async fn main() -> Result<()> {
             let header = if is_tabula {
                 format!("✨ Tabula Rasa — Theme: \"{theme}\"  [prompt #{prompt_count} — [*] sketching...]")
             } else if is_wild {
-                format!("🌊 Wild Zones — Theme: \"{theme}\"  [prompt #{prompt_count} — 🐢 creating...]")
+                format!("🌊 Wild Zones — Theme: \"{theme}\"  [prompt #{prompt_count} — 🕊️ creating...]")
             } else {
                 format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  [prompt #{prompt_count} — 🐢 building...]")
             };
@@ -312,6 +314,63 @@ async fn main() -> Result<()> {
                         tokio::time::sleep(Duration::from_millis(120)).await;
                     }
                 }
+                Action::PlaceGlyph { x, y, glyph } => {
+                    animate_walk(&mut garden, x, y, &header).await?;
+                    garden.place_glyph(x, y, &glyph);
+                    print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
+                    std::io::Write::flush(&mut std::io::stdout())?;
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                Action::DrawLine { y, x1, x2, glyph } => {
+                    animate_walk(&mut garden, x1, y, &header).await?;
+                    let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
+                    let step_range: Vec<usize> = if x1 <= x2 {
+                        (a..=b.min(width.saturating_sub(1))).collect()
+                    } else {
+                        (a..=b.min(width.saturating_sub(1))).rev().collect()
+                    };
+                    for x in step_range {
+                        garden.turtle_pos = Some((x, y));
+                        garden.place_glyph(x, y, &glyph);
+                        print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
+                        std::io::Write::flush(&mut std::io::stdout())?;
+                        tokio::time::sleep(Duration::from_millis(120)).await;
+                    }
+                }
+                Action::DrawRing { cx, cy, radius, glyph } => {
+                    let pts = garden.ring_points(cx, cy, radius);
+                    if let Some(&(fx, fy)) = pts.first() {
+                        animate_walk(&mut garden, fx, fy, &header).await?;
+                    }
+                    for (x, y) in pts {
+                        garden.turtle_pos = Some((x, y));
+                        garden.place_glyph(x, y, &glyph);
+                        print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
+                        std::io::Write::flush(&mut std::io::stdout())?;
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                }
+                Action::FillBox { x1, y1, x2, y2, glyph } => {
+                    let (min_x, max_x) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
+                    let (min_y, max_y) = if y1 <= y2 { (y1, y2) } else { (y2, y1) };
+                    animate_walk(&mut garden, min_x, min_y, &header).await?;
+                    for y in min_y..=max_y.min(height.saturating_sub(1)) {
+                        for x in min_x..=max_x.min(width.saturating_sub(1)) {
+                            garden.turtle_pos = Some((x, y));
+                            garden.place_glyph(x, y, &glyph);
+                            print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
+                            std::io::Write::flush(&mut std::io::stdout())?;
+                            tokio::time::sleep(Duration::from_millis(60)).await;
+                        }
+                    }
+                }
+                Action::ClearCell { x, y } => {
+                    animate_walk(&mut garden, x, y, &header).await?;
+                    garden.clear_cell(x, y);
+                    print!("\x1b[2J\x1b[H{header}\n\n{}", garden.render());
+                    std::io::Write::flush(&mut std::io::stdout())?;
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                }
                 Action::RakeLine { y, x1, x2 } => {
                     animate_walk(&mut garden, x1, y, &header).await?;
                     let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
@@ -364,12 +423,12 @@ async fn main() -> Result<()> {
                     }
                 }
                 Action::Done => {
-                    garden.turtle_glyph = if is_tabula { "[z]" } else { "💤" };
+                    garden.turtle_glyph = if is_tabula { "[z]" } else if is_wild { "✨" } else { "💤" };
                     for remaining in (1..=20).rev() {
                         let h = if is_tabula {
                             format!("✨ Tabula Rasa — \"{theme}\" — Complete! [z] admiring ({remaining}s until reset)")
                         } else if is_wild {
-                            format!("🌊 Wild Zones — \"{theme}\" — Complete! 💤 admiring ({remaining}s until reset)")
+                            format!("🌊 Wild Zones — \"{theme}\" — Complete! ✨ admiring ({remaining}s until reset)")
                         } else {
                             format!("🌿 karesansui — \"{theme}\" | Border: \"{border_name}\" — Complete! 💤 admiring ({remaining}s until reset)")
                         };
@@ -383,15 +442,15 @@ async fn main() -> Result<()> {
 
             // Rate limiting & pacing between prompts:
             let wait_secs = if prompt_count % 10 == 0 { rest } else { pace };
-            garden.turtle_glyph = if is_tabula { "[z]" } else { "💤" };
+            garden.turtle_glyph = if is_tabula { "[z]" } else if is_wild { "✨" } else { "💤" };
             for remaining in (1..=wait_secs).rev() {
                 if session_start.elapsed() >= SESSION_DURATION {
                     break;
                 }
                 let status = if prompt_count % 10 == 0 {
-                    format!("[prompt #{prompt_count} — {} resting {rest}s rate-limit pause: {remaining}s remaining]", if is_tabula { "[z]" } else { "💤" })
+                    format!("[prompt #{prompt_count} — {} resting {rest}s rate-limit pause: {remaining}s remaining]", if is_tabula { "[z]" } else if is_wild { "✨" } else { "💤" })
                 } else {
-                    format!("[prompt #{prompt_count} — {} resting: {remaining}s until next move]", if is_tabula { "[z]" } else { "💤" })
+                    format!("[prompt #{prompt_count} — {} resting: {remaining}s until next move]", if is_tabula { "[z]" } else if is_wild { "✨" } else { "💤" })
                 };
                 let h = if is_tabula {
                     format!("✨ Tabula Rasa — Theme: \"{theme}\"  {status}")
@@ -404,7 +463,7 @@ async fn main() -> Result<()> {
                 std::io::Write::flush(&mut std::io::stdout())?;
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
-            garden.turtle_glyph = if is_tabula { "[*]" } else { "🐢" };
+            garden.turtle_glyph = if is_tabula { "[*]" } else if is_wild { "🕊️" } else { "🐢" };
         }
 
         println!("\x1b[2J\x1b[H");

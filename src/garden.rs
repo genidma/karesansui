@@ -25,6 +25,16 @@ pub enum Action {
     PlaceAscii { x: usize, y: usize, glyph: String },
     /// Draw a horizontal ASCII stroke or line from x1 to x2 on row y using arbitrary ASCII characters.
     DrawAsciiLine { y: usize, x1: usize, x2: usize, glyph: String },
+    /// Place ANY universal character(s) — single emoji, symbol, or 1-2 ASCII characters at (x, y) for Wild Zones liberation.
+    PlaceGlyph { x: usize, y: usize, glyph: String },
+    /// Draw a horizontal stroke of any glyph from x1 to x2 on row y.
+    DrawLine { y: usize, x1: usize, x2: usize, glyph: String },
+    /// Draw a circular ring of any glyph centered at (cx, cy) with given radius.
+    DrawRing { cx: usize, cy: usize, radius: usize, glyph: String },
+    /// Fill a rectangular box from (x1, y1) to (x2, y2) with any glyph.
+    FillBox { x1: usize, y1: usize, x2: usize, y2: usize, glyph: String },
+    /// Clear or reset a specific cell back to empty space (`  `).
+    ClearCell { x: usize, y: usize },
     /// Draw a border frame around the whole garden.
     DrawBorder,
     /// Signal that the garden is complete.
@@ -367,6 +377,75 @@ impl Garden {
         for x in a..=b.min(self.width.saturating_sub(1)) {
             self.place_ascii(x, y, glyph);
         }
+    }
+
+    pub fn format_2col_glyph(&self, glyph: &str) -> String {
+        let clean: Vec<char> = glyph
+            .chars()
+            .filter(|c| *c != '\n' && *c != '\r' && !c.is_control())
+            .collect();
+        if clean.is_empty() {
+            return "  ".to_string();
+        }
+        let first = clean[0];
+        if first.is_ascii() {
+            if clean.len() >= 2 && clean[1].is_ascii() {
+                let mut s = String::new();
+                s.push(first);
+                s.push(clean[1]);
+                s
+            } else {
+                format!("{} ", first)
+            }
+        } else {
+            // Non-ASCII emoji or wide symbol naturally occupies 2 terminal columns.
+            first.to_string()
+        }
+    }
+
+    pub fn place_glyph(&mut self, x: usize, y: usize, glyph: &str) {
+        if y >= self.height || x >= self.width {
+            return;
+        }
+        self.grid[y][x] = self.format_2col_glyph(glyph);
+    }
+
+    #[allow(dead_code)]
+    pub fn draw_line(&mut self, y: usize, x1: usize, x2: usize, glyph: &str) {
+        if y >= self.height {
+            return;
+        }
+        let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
+        for x in a..=b.min(self.width.saturating_sub(1)) {
+            self.place_glyph(x, y, glyph);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn draw_ring(&mut self, cx: usize, cy: usize, radius: usize, glyph: &str) {
+        let pts = self.ring_points(cx, cy, radius);
+        for (x, y) in pts {
+            self.place_glyph(x, y, glyph);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn fill_box(&mut self, x1: usize, y1: usize, x2: usize, y2: usize, glyph: &str) {
+        let (min_x, max_x) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
+        let (min_y, max_y) = if y1 <= y2 { (y1, y2) } else { (y2, y1) };
+        for y in min_y..=max_y.min(self.height.saturating_sub(1)) {
+            for x in min_x..=max_x.min(self.width.saturating_sub(1)) {
+                self.place_glyph(x, y, glyph);
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_cell(&mut self, x: usize, y: usize) {
+        if y >= self.height || x >= self.width {
+            return;
+        }
+        self.grid[y][x] = EMPTY.to_string();
     }
 
     #[allow(dead_code)]

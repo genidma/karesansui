@@ -137,7 +137,7 @@ pub const THEMES: &[(&str, &str)] = &[
     ),
     (
         "Wild Zones (Unbound Serenity)",
-        "No rules (except strict safety: no profanity, no abusive or threatening language). Guided by common sense, peace, and serenity, you have absolute freedom to mix pure ASCII art, emoji, mandalas, raked ripples, and borders anywhere on the canvas.",
+        "True liberation: all zen garden rules, raked sand, mandalas, and rigid borders are completely removed. Guided strictly by peace, calm, and serenity (zero profanity/threats/abuse), you have absolute freedom across the open canvas (`place_glyph`, `draw_line`, `draw_ring`, `fill_box`, `clear_cell`) using any emoji or ASCII characters.",
     ),
 ];
 
@@ -281,31 +281,27 @@ impl Gardener {
             };
             let actions_block = format!(
                 r#"Available actions (return ONE as raw JSON, no markdown, no extra text):
-{{"action": "place_ascii", "x": <0-{max_x}>, "y": <0-{max_y}>, "glyph": "<1-2 ASCII chars, e.g. '# ', '/**', '/\\', '||', '..', '==', '++'>"}}
-{{"action": "draw_ascii_line", "y": <0-{max_y}>, "x1": <0-{max_x}>, "x2": <0-{max_x}>, "glyph": "<1-2 ASCII chars>"}}
-{{"action": "rake_line", "y": <0-{max_y}>, "x1": <0-{max_x}>, "x2": <0-{max_x}>}}
-{{"action": "rake_ring", "cx": <0-{max_x}>, "cy": <0-{max_y}>, "radius": <2-10>}}
-{{"action": "place_mandala", "x": <0-{max_x}>, "y": <0-{max_y}>, "style": <1-6>}}
-{{"action": "place_rock", "x": <0-{max_x}>, "y": <0-{max_y}>, "size": <1-3>}}
-{{"action": "place_moss", "x": <0-{max_x}>, "y": <0-{max_y}>}}
-{{"action": "place_gravel", "y": <0-{max_y}>, "x1": <0-{max_x}>, "x2": <0-{max_x}>}}
-{{"action": "place_flower", "x": <0-{max_x}>, "y": <0-{max_y}>}}
-{{"action": "place_lantern", "x": <0-{max_x}>, "y": <0-{max_y}>}}
-{{"action": "draw_border"}}
+{{"action": "place_glyph", "x": <0-{max_x}>, "y": <0-{max_y}>, "glyph": "<any single emoji like '🌲','⭐','🌊','🪐','🕊️','⚡','✨','🏔️','☁️' or 1-2 ASCII chars like '# ','/**','/\\','||','..','==','++'>"}}
+{{"action": "draw_line", "y": <0-{max_y}>, "x1": <0-{max_x}>, "x2": <0-{max_x}>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
+{{"action": "draw_ring", "cx": <0-{max_x}>, "cy": <0-{max_y}>, "radius": <2-12>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
+{{"action": "fill_box", "x1": <0-{max_x}>, "y1": <0-{max_y}>, "x2": <0-{max_x}>, "y2": <0-{max_y}>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
+{{"action": "clear_cell", "x": <0-{max_x}>, "y": <0-{max_y}>}}
 {{"action": "done"}}"#
             );
             let sys = format!(
-                "You are a serene, creative AI composing in a \"Wild Zone\" — an open terminal canvas ({w} columns x {h} rows) dedicated to calm, peace, and absolute creative freedom.\n\n\
+                "You are a serene, creative AI composing inside the \"Wild Zone\" — an open terminal canvas ({w} columns x {h} rows) of absolute creative liberation and peace.\n\n\
                  YOUR MISSION:\n\
-                 You have absolute freedom over the entire canvas (x: 0..{max_x}, y: 0..{max_y}). You can freely mix and match ANY combination of pure ASCII art (`place_ascii`, `draw_ascii_line`), zen garden elements (`place_rock`, `place_moss`, `place_flower`, `place_lantern`), raked sand ripples (`rake_line`, `rake_ring`), geometric mandalas (`place_mandala`), and dynamic borders (`draw_border`).\n\n\
+                 All concepts and code restrictions from other themes (zen gardens, raked sand, mandalas, and rigid borders) are completely removed. You are truly free.\n\
+                 You have absolute freedom across the entire grid (x: 0..{max_x}, y: 0..{max_y}). Create whatever inspires you: serene natural landscapes, celestial starfields, abstract generative textures, cosmic phenomena, peaceful forests, or poetic compositions.\n\
+                 You can freely place ANY standard emoji (`🌲`, `⭐`, `🌊`, `🪐`, `🕊️`, `⚡`, `✨`, `🏔️`, `☁️`, `🔮`, `🌌`, `🌿`, `🌙`) or ANY 1-2 ASCII characters (`# `, `/**`, `/\\`, `||`, `..`, `==`, `++`) anywhere using universal drawing actions (`place_glyph`, `draw_line`, `draw_ring`, `fill_box`, `clear_cell`).\n\n\
                  SESSION THEME: \"{theme_name}\"\n\
                  {theme_desc}\n\n\
                  {actions_block}\n\n\
                  RULES:\n\
-                 1. ABSOLUTE FREEDOM: No rules on what you create or how you mix elements — whether it's an abstract mandala fused with ASCII architecture, a peaceful wild jungle, a starfield with lanterns, or generative art.\n\
-                 2. STRICT SAFETY & SERENITY: Absolutely NO profanity, NO abusive language, and NO threatening content. Guided by common sense, peace, calm, and serenity.\n\
-                 3. GRID MECHANICS: Every cell is 2 columns wide. For `place_ascii` / `draw_ascii_line`, provide `glyph` as exactly 1 or 2 standard ASCII characters (`/`, `\\`, `|`, `-`, `_`, `*`, `#`, `@`, `.`, `+`, `~`, `^`, `:`, `=`, `[`, `]`, `(`, `)`). For other items, use their dedicated action.\n\
-                 4. Take your time over 15-35 prompts to build up your wild zone, then call `done` when complete.\n\
+                 1. ABSOLUTE LIBERATION: No thematic boundaries, no pre-packaged garden elements, and no structural restrictions. You decide every shape, texture, and symbol.\n\
+                 2. STRICT SAFETY & SERENITY: Absolutely NO profanity, NO abusive language, and NO threatening content. Guided strictly by common sense, peace, calm, and serenity.\n\
+                 3. GRID MECHANICS: Every terminal grid cell is 2 columns wide. If placing an emoji (`🌲`, `⭐`), pass exactly 1 emoji per cell. If placing ASCII (`# `, `**`), pass exactly 1 or 2 ASCII characters per cell so they fit cleanly without distorting alignment.\n\
+                 4. Take your time over 15-35 prompts to build up your wild composition, then call `done` when complete.\n\
                  5. NEVER repeat the exact same action. Each turn must introduce something unique.\n\
                  6. Return ONLY one raw JSON object. No markdown fences.{completion_hint}",
                 w = self.width,

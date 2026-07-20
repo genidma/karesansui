@@ -100,7 +100,7 @@ Each run selects or assigns one of **19 themes**:
 - **Fractal Starfield Void** *(✨ NEW)* — self-similar lattice of stars (`✦ `) and geometric crests (`❖ `)
 - **Yin-Yang Balance** *(✨ NEW)* — dual equilibrium dividing circular sand rings from textured gravel (`··`) and moss (`🌿`)
 - **Tabula Rasa (Pure ASCII Muse)** *(✨ NEW)* — complete rethink: ignores all zen garden instructions and emoji, giving the LLM pure ASCII sketching freedom (`place_ascii`, `draw_ascii_line`) across the blank canvas (`[*]`) based on what inspires it right now
-- **Wild Zones (Unbound Serenity)** *(✨ NEW)* — absolute freedom without rules (guarded strictly by common sense, peace, calm, and zero profanity/threats/abuse), allowing the LLM to freely combine pure ASCII art, geometric mandalas, raked ripples, zen garden accents, and borders anywhere across the canvas
+- **Wild Zones (Unbound Serenity)** *(✨ NEW)* — true liberation (`🕊️`): all zen garden rules, raked sand, mandalas, and rigid borders are completely removed. Guided strictly by peace, calm, and serenity (zero profanity/threats/abuse), the LLM has absolute freedom across the open canvas (`place_glyph`, `draw_line`, `draw_ring`, `fill_box`, `clear_cell`) using any emoji or ASCII characters without influence from other themes
 
 ## Free models only — enforced
 
