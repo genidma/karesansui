@@ -330,6 +330,23 @@ mod tests {
     use crate::color::palettes;
 
     #[test]
+    fn test_draw_path_action() {
+        let mut canvas = Canvas::new(20, 20);
+        let palette = palettes::gridwright_default();
+
+        let action = PixelArtAction::DrawPath {
+            points: vec![(1, 1), (3, 2), (5, 1)],
+            glyph: "/".to_string(),
+            color_index: None,
+        };
+
+        let done = PixelArtExecutor::execute(&action, &mut canvas, &palette).unwrap();
+        assert!(!done);
+        assert_eq!(canvas.get_pixel(Point::new(1, 1)).unwrap().glyph, "/");
+        assert_eq!(canvas.get_pixel(Point::new(5, 1)).unwrap().glyph, "/");
+    }
+
+    #[test]
     fn test_gridwright_config() {
         let config = GridwrightConfig::new(32, 16)
             .with_subject("A mountain")
