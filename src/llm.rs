@@ -69,23 +69,30 @@ impl Gardener {
     }
 
     pub async fn next_action(&self, state: &str) -> Result<Action> {
+        let max_x = self.width.saturating_sub(2);
+        let max_y = self.height.saturating_sub(2);
+
         let system = format!(
-            "You are the gardener of an ASCII zen garden of size {w}x{h}. \
-             Decide the NEXT single action to slowly build a peaceful, balanced garden. \
-             Return ONLY valid raw JSON with one of these shapes (no markdown code blocks, no explanation):\n\
-             {{\"action\":\"place_rock\",\"x\":<0-{xmax}>,\"y\":<0-{ymax}>,\"size\":<1-3>}}\n\
-             {{\"action\":\"rake_line\",\"y\":<0-{ymax}>,\"x1\":<0-{xmax}>,\"x2\":<0-{xmax}>}}\n\
+            "You are the gardener of an ASCII zen garden of size {w}x{h}.\n\
+             Decide the NEXT single action to build a peaceful, balanced zen garden.\n\
+             Return ONLY valid raw JSON matching one of these shapes (no markdown code blocks, no extra text):\n\
+             {{\"action\":\"place_rock\",\"x\":<1-{max_x}>,\"y\":<1-{max_y}>,\"size\":<1-3>}}\n\
+             {{\"action\":\"rake_line\",\"y\":<1-{max_y}>,\"x1\":<1-{max_x}>,\"x2\":<1-{max_x}>}}\n\
              {{\"action\":\"draw_border\"}}\n\
-             {{\"action\":\"done\"}}\n\
-             Prefer starting with draw_border, then rake_lines, then scatter a few rocks. \
-             Call done once the garden feels complete (roughly 12-20 actions).",
+             {{\"action\":\"done\"}}\n\n\
+             RULES:\n\
+             1. If the outer border `#` is missing, call `draw_border` first.\n\
+             2. If the outer border `#` is ALREADY drawn, DO NOT call `draw_border` again!\n\
+             3. Fill empty rows inside the border with raked sand lines (`rake_line`).\n\
+             4. Scatter several rocks (`place_rock`) of various sizes inside the garden.\n\
+             5. Do NOT call `done` until the garden has multiple raked lines and several rocks placed.",
             w = self.width,
             h = self.height,
-            xmax = self.width - 1,
-            ymax = self.height - 1,
+            max_x = max_x,
+            max_y = max_y,
         );
 
-        let user = format!("Current garden:\n{state}\nWhat is your next action?");
+        let user = format!("Current garden state:\n{state}\nWhat is your next action?");
 
         let body = json!({
             "model": self.model,
@@ -116,7 +123,6 @@ impl Gardener {
             .map(|c| c.message.content.clone())
             .ok_or_else(|| anyhow::anyhow!("no choices returned from OpenRouter"))?;
 
-        // Strip ```json markdown wrappers if the model includes them
         let clean = content
             .trim()
             .strip_prefix("```json")

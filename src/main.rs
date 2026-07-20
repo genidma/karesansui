@@ -9,9 +9,7 @@ use llm::Gardener;
 
 const WIDTH: usize = 48;
 const HEIGHT: usize = 20;
-/// Pacing between gardener actions — the "slow video game" feel.
 const TICK: Duration = Duration::from_millis(1500);
-/// Hard cap so it can't loop forever if the LLM never says done.
 const MAX_ACTIONS: usize = 40;
 
 #[tokio::main]
@@ -24,21 +22,30 @@ async fn main() -> Result<()> {
     let mut garden = Garden::new(WIDTH, HEIGHT);
     let gardener = Gardener::new(model, WIDTH, HEIGHT)?;
 
-    println!("\x1b[2J\x1b[H"); // clear screen
+    println!("\x1b[2J\x1b[H");
     println!("🌿 karesansui — the LLM is tending the garden...\n");
+
+    let mut consecutive_errors = 0;
 
     for _ in 0..MAX_ACTIONS {
         let state = garden.render();
-        // Redraw in place.
         print!("\x1b[2J\x1b[H");
         print!("🌿 karesansui\n\n{state}");
         std::io::Write::flush(&mut std::io::stdout())?;
 
         let action = match gardener.next_action(&state).await {
-            Ok(a) => a,
+            Ok(a) => {
+                consecutive_errors = 0;
+                a
+            }
             Err(e) => {
-                eprintln!("gardener error: {e}");
-                break;
+                consecutive_errors += 1;
+                if consecutive_errors >= 3 {
+                    eprintln!("\ngardener error: {e}");
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
             }
         };
 
@@ -58,7 +65,6 @@ async fn main() -> Result<()> {
         tokio::time::sleep(TICK).await;
     }
 
-    // Final render if we hit the cap.
     print!("\x1b[2J\x1b[H");
     println!("🌿 karesansui — session limit reached\n");
     print!("{}", garden.render());
