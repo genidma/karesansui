@@ -1,4 +1,3 @@
-use rand::seq::IndexedRandom;
 use serde::{Deserialize, Serialize};
 
 /// A single gardener action returned by the LLM.
@@ -13,42 +12,41 @@ pub enum Action {
     RakeRing { cx: usize, cy: usize, radius: usize },
     /// Place a patch of moss at (x, y).
     PlaceMoss { x: usize, y: usize },
-    /// Scatter gravel across a horizontal span on a row.
-    PlaceGravel { y: usize, x1: usize, x2: usize },
-    /// Place a cherry blossom accent at (x, y).
+    /// Place a flower patch at (x, y).
     PlaceFlower { x: usize, y: usize },
     /// Place a stone lantern at (x, y).
     PlaceLantern { x: usize, y: usize },
-    /// Place a geometric minimalist mandala or fractal accent at (x, y). `style` 1-6 controls the glyph.
+    /// Place a mandala or fractal pattern center at (x, y) with given style (1-6).
     PlaceMandala { x: usize, y: usize, style: u8 },
-    /// Place arbitrary ASCII glyph(s) at (x, y) for Tabula Rasa freeform art.
+    /// Place an ASCII minimalist character at (x, y).
     PlaceAscii { x: usize, y: usize, glyph: String },
-    /// Draw a horizontal ASCII stroke or line from x1 to x2 on row y using arbitrary ASCII characters.
+    /// Draw an ASCII minimalist horizontal line from x1 to x2 at row y using glyph.
     DrawAsciiLine { y: usize, x1: usize, x2: usize, glyph: String },
-    /// Place ANY universal character(s) — single emoji, symbol, or 1-2 ASCII characters at (x, y) for Wild Zones liberation.
+    /// Place a custom glyph or emoji at (x, y).
     PlaceGlyph { x: usize, y: usize, glyph: String },
-    /// Draw a horizontal stroke of any glyph from x1 to x2 on row y.
+    /// Draw a horizontal line of custom glyphs from x1 to x2 at row y.
     DrawLine { y: usize, x1: usize, x2: usize, glyph: String },
-    /// Draw a circular ring of any glyph centered at (cx, cy) with given radius.
+    /// Draw a circular ring of custom glyphs centered at (cx, cy) with given radius.
     DrawRing { cx: usize, cy: usize, radius: usize, glyph: String },
-    /// Fill a rectangular box from (x1, y1) to (x2, y2) with any glyph.
+    /// Fill a rectangular box from (x1, y1) to (x2, y2) with custom glyphs.
     FillBox { x1: usize, y1: usize, x2: usize, y2: usize, glyph: String },
-    /// Clear or reset a specific cell back to empty space (`  `).
+    /// Clear a cell at (x, y) back to empty.
     ClearCell { x: usize, y: usize },
+    /// Place gravel in a horizontal line from x1 to x2 at row y.
+    PlaceGravel { y: usize, x1: usize, x2: usize },
     /// Draw a border frame around the whole garden.
     DrawBorder,
-    /// Signal that the garden is complete.
+    /// Signal that the garden composition is complete.
     Done,
 }
 
-/// Glyphs — each is exactly 2 terminal columns wide for alignment.
 pub const EMPTY: &str = "  ";
 #[allow(dead_code)]
 pub const BORDER: &str = "🎋";
 pub const RAKED: &str = "~~";
 pub const ROCK_S: &str = "🪨";
 pub const ROCK_M: &str = "🗿";
-pub const ROCK_L: &str = "🗿";
+pub const ROCK_L: &str = "🗻";
 pub const MOSS: &str = "🌿";
 pub const GRAVEL: &str = "··";
 pub const FLOWER: &str = "🌸";
@@ -167,6 +165,18 @@ pub const BORDER_PATTERNS: &[BorderPattern] = &[
     },
 ];
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GardenState {
+    pub width: usize,
+    pub height: usize,
+    pub grid: Vec<Vec<String>>,
+    pub turtle_pos: Option<(usize, usize)>,
+    pub turtle_glyph: String,
+    pub border_pattern_index: usize,
+    pub prompt_count: usize,
+    pub theme_name: String,
+}
+
 /// The ASCII + emoji zen garden grid.
 /// Each cell is a 2-column-wide string so emojis and ASCII mix cleanly.
 pub struct Garden {
@@ -179,13 +189,16 @@ pub struct Garden {
     pub turtle_glyph: &'static str,
     /// The aesthetic border pattern framing this session's garden.
     pub border_pattern: BorderPattern,
+    pub border_pattern_index: usize,
 }
 
 impl Garden {
     pub fn new(width: usize, height: usize) -> Self {
         let grid = vec![vec![EMPTY.to_string(); width]; height];
+        use rand::Rng;
         let mut rng = rand::rng();
-        let border_pattern = BORDER_PATTERNS.choose(&mut rng).unwrap().clone();
+        let idx = rng.random_range(0..BORDER_PATTERNS.len());
+        let border_pattern = BORDER_PATTERNS[idx].clone();
         Self {
             width,
             height,
@@ -193,6 +206,7 @@ impl Garden {
             turtle_pos: Some((1, 1)),
             turtle_glyph: "🐢",
             border_pattern,
+            border_pattern_index: idx,
         }
     }
 
@@ -477,5 +491,81 @@ impl Garden {
             out.push('\n');
         }
         out
+    }
+
+    pub fn render_colored(&self, no_color: bool) -> String {
+        if no_color {
+            return self.render();
+        }
+        use crossterm::style::Stylize;
+        let mut out = String::new();
+        for (y, row) in self.grid.iter().enumerate() {
+            for (x, cell) in row.iter().enumerate() {
+                if let Some((tx, ty)) = self.turtle_pos {
+                    if x == tx && y == ty {
+                        out.push_str(&self.turtle_glyph.yellow().bold().to_string());
+                        continue;
+                    }
+                }
+                let styled = match cell.as_str() {
+                    ROCK_S | ROCK_M | ROCK_L => cell.as_str().dark_grey().bold().to_string(),
+                    MOSS => cell.as_str().green().to_string(),
+                    FLOWER => cell.as_str().magenta().to_string(),
+                    RAKED | "≈≈" | GRAVEL => cell.as_str().dark_cyan().to_string(),
+                    EMPTY => cell.clone(),
+                    _ => {
+                        if x == 0 || y == 0 || x == self.width.saturating_sub(1) || y == self.height.saturating_sub(1) {
+                            cell.as_str().yellow().to_string()
+                        } else {
+                            cell.clone()
+                        }
+                    }
+                };
+                out.push_str(&styled);
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    pub fn save_to_file(&self, path: &str, prompt_count: usize, theme_name: &str) -> anyhow::Result<()> {
+        let state = GardenState {
+            width: self.width,
+            height: self.height,
+            grid: self.grid.clone(),
+            turtle_pos: self.turtle_pos,
+            turtle_glyph: self.turtle_glyph.to_string(),
+            border_pattern_index: self.border_pattern_index,
+            prompt_count,
+            theme_name: theme_name.to_string(),
+        };
+        let json = serde_json::to_string_pretty(&state)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    pub fn load_from_file(path: &str) -> anyhow::Result<(Self, usize, String)> {
+        let content = std::fs::read_to_string(path)?;
+        let state: GardenState = serde_json::from_str(&content)?;
+        let border_pattern = BORDER_PATTERNS
+            .get(state.border_pattern_index)
+            .cloned()
+            .unwrap_or_else(|| BORDER_PATTERNS[0].clone());
+        let turtle_glyph = match state.turtle_glyph.as_str() {
+            "💤" => "💤",
+            "[*]" => "[*]",
+            "[z]" => "[z]",
+            _ => "🐢",
+        };
+        let garden = Self {
+            width: state.width,
+            height: state.height,
+            grid: state.grid,
+            turtle_pos: state.turtle_pos,
+            turtle_glyph,
+            border_pattern,
+            border_pattern_index: state.border_pattern_index,
+        };
+        Ok((garden, state.prompt_count, state.theme_name))
     }
 }

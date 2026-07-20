@@ -8,16 +8,19 @@ use crate::garden::Action;
 const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ORResponse {
     choices: Vec<Choice>,
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct Choice {
     message: ChatMessageOut,
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ChatMessageOut {
     content: String,
 }
@@ -139,6 +142,10 @@ pub const THEMES: &[(&str, &str)] = &[
         "Wild Zones (Unbound Serenity)",
         "True liberation: all zen garden rules, raked sand, mandalas, and rigid borders are completely removed. Guided strictly by peace, calm, and serenity (zero profanity/threats/abuse), you have absolute freedom across the open canvas (`place_glyph`, `draw_line`, `draw_ring`, `fill_box`, `clear_cell`) using any emoji or ASCII characters.",
     ),
+    (
+        "Gridwright (The Deliberate Grid as Craft)",
+        "Pixel-perfect grid art where every cell is a deliberate choice. Use a palette, precise geometric shapes, and mathematical composition. No scaling, no smoothing, no interpolation—just pure, intentional placement on a clean grid. The LLM orchestrates pixel-by-pixel construction using SetPixel, DrawLine, DrawCircle, FillRectangle, and palette color indices.",
+    ),
 ];
 
 pub struct Gardener {
@@ -149,6 +156,7 @@ pub struct Gardener {
     height: usize,
     theme_name: String,
     theme_desc: String,
+    dry_run: bool,
 }
 
 impl Gardener {
@@ -157,16 +165,21 @@ impl Gardener {
         width: usize,
         height: usize,
         theme_choice: Option<&str>,
+        dry_run: bool,
     ) -> Result<Self> {
-        let api_key = std::env::var("OPENROUTER_API_KEY")
-            .map_err(|_| anyhow::anyhow!("OPENROUTER_API_KEY not set (add it to .env)"))?;
+        let api_key = if dry_run {
+            String::new()
+        } else {
+            std::env::var("OPENROUTER_API_KEY")
+                .map_err(|_| anyhow::anyhow!("OPENROUTER_API_KEY not set (add it to .env)"))?
+        };
 
         let requested = model.into();
         let model = if FREE_MODELS.contains(&requested.as_str()) {
             requested
         } else {
-            eprintln!(
-                "⚠ model '{requested}' is not on the free allowlist; using default free model instead"
+            log::warn!(
+                "model '{requested}' is not on the free allowlist; using default free model instead"
             );
             "tencent/hy3:free".to_string()
         };
@@ -178,7 +191,7 @@ impl Gardener {
                     if num >= 1 && num <= THEMES.len() {
                         THEMES[num - 1]
                     } else {
-                        eprintln!("⚠ theme index {num} out of bounds (1..{}); choosing randomly", THEMES.len());
+                        log::warn!("theme index {num} out of bounds (1..{}); choosing randomly", THEMES.len());
                         *THEMES.choose(&mut rng).unwrap()
                     }
                 } else {
@@ -188,7 +201,7 @@ impl Gardener {
                         .find(|(name, _)| name.to_lowercase().contains(&choice.to_lowercase()))
                         .copied()
                         .unwrap_or_else(|| {
-                            eprintln!("⚠ theme '{choice}' not found; choosing randomly");
+                            log::warn!("theme '{choice}' not found; choosing randomly");
                             *THEMES.choose(&mut rng).unwrap()
                         })
                 }
@@ -206,6 +219,7 @@ impl Gardener {
             height,
             theme_name: name.to_string(),
             theme_desc: desc.to_string(),
+            dry_run,
         })
     }
 
@@ -281,7 +295,7 @@ impl Gardener {
             };
             let actions_block = format!(
                 r#"Available actions (return ONE as raw JSON, no markdown, no extra text):
-{{"action": "place_glyph", "x": <0-{max_x}>, "y": <0-{max_y}>, "glyph": "<any single emoji like '🌲','⭐','🌊','🪐','🕊️','⚡','✨','🏔️','☁️' or 1-2 ASCII chars like '# ','/**','/\\','||','..','==','++'>"}}
+{{"action": "place_glyph", "x": <0-{max_x}>, "y": <0-{max_y}>, "glyph": "<any single emoji like '🌲','⭐','🌊','🪐','⚡','🏔️','☁️' or 1-2 ASCII chars like '# ','/**','/\\','||','..','==','++'>"}}
 {{"action": "draw_line", "y": <0-{max_y}>, "x1": <0-{max_x}>, "x2": <0-{max_x}>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
 {{"action": "draw_ring", "cx": <0-{max_x}>, "cy": <0-{max_y}>, "radius": <2-12>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
 {{"action": "fill_box", "x1": <0-{max_x}>, "y1": <0-{max_y}>, "x2": <0-{max_x}>, "y2": <0-{max_y}>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
@@ -293,7 +307,7 @@ impl Gardener {
                  YOUR MISSION:\n\
                  All concepts and code restrictions from other themes (zen gardens, raked sand, mandalas, and rigid borders) are completely removed. You are truly free.\n\
                  You have absolute freedom across the entire grid (x: 0..{max_x}, y: 0..{max_y}). Create whatever inspires you: serene natural landscapes, celestial starfields, abstract generative textures, cosmic phenomena, peaceful forests, or poetic compositions.\n\
-                 You can freely place ANY standard emoji (`🌲`, `⭐`, `🌊`, `🪐`, `🕊️`, `⚡`, `✨`, `🏔️`, `☁️`, `🔮`, `🌌`, `🌿`, `🌙`) or ANY 1-2 ASCII characters (`# `, `/**`, `/\\`, `||`, `..`, `==`, `++`) anywhere using universal drawing actions (`place_glyph`, `draw_line`, `draw_ring`, `fill_box`, `clear_cell`).\n\n\
+                 You can freely place ANY standard emoji (`🌲`, `⭐`, `🌊`, `🪐`, `⚡`, `🏔️`, `☁️`, `🔮`, `🌌`, `🌿`, `🌙`) or ANY 1-2 ASCII characters (`# `, `/**`, `/\\`, `||`, `..`, `==`, `++`) anywhere using universal drawing actions (`place_glyph`, `draw_line`, `draw_ring`, `fill_box`, `clear_cell`).\n\n\
                  SESSION THEME: \"{theme_name}\"\n\
                  {theme_desc}\n\n\
                  {actions_block}\n\n\
@@ -381,6 +395,10 @@ impl Gardener {
             (sys, usr)
         };
 
+        if self.dry_run {
+            return self.simulate_action(border_drawn, action_num);
+        }
+
         let body = json!({
             "model": self.model,
             "messages": [
@@ -390,38 +408,191 @@ impl Gardener {
             "temperature": 0.8,
         });
 
-        let resp = self
-            .client
-            .post(OPENROUTER_URL)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .header("HTTP-Referer", "https://github.com/karesansui")
-            .header("X-Title", "karesansui")
-            .json(&body)
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<ORResponse>()
-            .await?;
+        let mut backoff = std::time::Duration::from_millis(1000);
+        let max_attempts = 4;
 
-        let content = resp
-            .choices
-            .first()
-            .map(|c| c.message.content.clone())
-            .ok_or_else(|| anyhow::anyhow!("no choices returned from OpenRouter"))?;
+        for attempt in 1..=max_attempts {
+            let resp_result = self
+                .client
+                .post(OPENROUTER_URL)
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("Content-Type", "application/json")
+                .header("HTTP-Referer", "https://github.com/karesansui")
+                .header("X-Title", "karesansui")
+                .json(&body)
+                .send()
+                .await;
 
-        let clean = content
-            .trim()
-            .strip_prefix("```json")
-            .unwrap_or(content.trim())
-            .strip_prefix("```")
-            .unwrap_or(content.trim())
-            .strip_suffix("```")
-            .unwrap_or(content.trim())
-            .trim();
+            let resp = match resp_result {
+                Ok(r) => r,
+                Err(e) => {
+                    if attempt < max_attempts {
+                        log::warn!("Network error calling OpenRouter (attempt {attempt}/{max_attempts}): {e}. Retrying in {backoff:?}...");
+                        tokio::time::sleep(backoff).await;
+                        backoff *= 2;
+                        continue;
+                    } else {
+                        return Err(anyhow::anyhow!("OpenRouter network error after {max_attempts} attempts: {e}"));
+                    }
+                }
+            };
 
-        let action: Action = serde_json::from_str(clean)
-            .map_err(|e| anyhow::anyhow!("failed to parse LLM action '{clean}': {e}"))?;
-        Ok(action)
+            let status = resp.status();
+            if !status.is_success() {
+                let err_body = resp.text().await.unwrap_or_default();
+                if (status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                    || status.is_server_error()
+                    || status == reqwest::StatusCode::BAD_REQUEST)
+                    && attempt < max_attempts
+                {
+                    log::warn!("OpenRouter API returned status {status} (attempt {attempt}/{max_attempts}): {err_body}. Retrying in {backoff:?}...");
+                    tokio::time::sleep(backoff).await;
+                    backoff *= 2;
+                    continue;
+                } else {
+                    return Err(anyhow::anyhow!("OpenRouter API error (status {status}): {err_body}"));
+                }
+            }
+
+            let or_resp = match resp.json::<ORResponse>().await {
+                Ok(data) => data,
+                Err(e) => {
+                    if attempt < max_attempts {
+                        log::warn!("Failed to parse JSON response (attempt {attempt}/{max_attempts}): {e}. Retrying in {backoff:?}...");
+                        tokio::time::sleep(backoff).await;
+                        backoff *= 2;
+                        continue;
+                    } else {
+                        return Err(anyhow::anyhow!("Failed to parse OpenRouter JSON after {max_attempts} attempts: {e}"));
+                    }
+                }
+            };
+
+            let content = or_resp
+                .choices
+                .first()
+                .map(|c| c.message.content.clone())
+                .ok_or_else(|| anyhow::anyhow!("no choices returned from OpenRouter"))?;
+
+            let clean = content
+                .trim()
+                .strip_prefix("```json")
+                .unwrap_or(content.trim())
+                .strip_prefix("```")
+                .unwrap_or(content.trim())
+                .strip_suffix("```")
+                .unwrap_or(content.trim())
+                .trim();
+
+            let action: Action = serde_json::from_str(clean)
+                .map_err(|e| anyhow::anyhow!("failed to parse LLM action '{clean}': {e}"))?;
+            return Ok(action);
+        }
+        Err(anyhow::anyhow!("Exceeded maximum retry attempts"))
+    }
+
+    fn simulate_action(&self, border_drawn: bool, _action_num: usize) -> Result<Action> {
+        use rand::seq::IndexedRandom;
+        use rand::Rng;
+        let mut rng = rand::rng();
+        let max_x = self.width.saturating_sub(2).max(2);
+        let max_y = self.height.saturating_sub(2).max(2);
+
+        if self.is_wild_zones() {
+            let choice = rng.random_range(0..5);
+            return Ok(match choice {
+                0 => Action::PlaceGlyph {
+                    x: rng.random_range(1..max_x),
+                    y: rng.random_range(1..max_y),
+                    glyph: ["🌲", "⭐", "🌊", "🪐", "⚡", "🏔️", "☁️", "🔮"].choose(&mut rng).unwrap().to_string(),
+                },
+                1 => Action::DrawLine {
+                    y: rng.random_range(1..max_y),
+                    x1: 1,
+                    x2: max_x,
+                    glyph: ["# ", "== ", ".. ", "++ "].choose(&mut rng).unwrap().to_string(),
+                },
+                2 => Action::DrawRing {
+                    cx: max_x / 2,
+                    cy: max_y / 2,
+                    radius: rng.random_range(2..6),
+                    glyph: ["* ", "o "].choose(&mut rng).unwrap().to_string(),
+                },
+                3 => Action::FillBox {
+                    x1: rng.random_range(1..=max_x/2),
+                    y1: rng.random_range(1..=max_y/2),
+                    x2: rng.random_range(max_x/2..=max_x),
+                    y2: rng.random_range(max_y/2..=max_y),
+                    glyph: [". ", ", "].choose(&mut rng).unwrap().to_string(),
+                },
+                _ => Action::ClearCell {
+                    x: rng.random_range(1..max_x),
+                    y: rng.random_range(1..max_y),
+                },
+            });
+        }
+
+        if self.is_tabula_rasa() {
+            let choice = rng.random_range(0..4);
+            return Ok(match choice {
+                0 => Action::PlaceAscii {
+                    x: rng.random_range(1..max_x),
+                    y: rng.random_range(1..max_y),
+                    glyph: ["/", "\\", "|", "+", "*", "o", "#", "@", "."].choose(&mut rng).unwrap().to_string(),
+                },
+                1 => Action::DrawAsciiLine {
+                    y: rng.random_range(1..max_y),
+                    x1: 1,
+                    x2: max_x,
+                    glyph: ["-", "=", "~", "."].choose(&mut rng).unwrap().to_string(),
+                },
+                2 => Action::ClearCell {
+                    x: rng.random_range(1..max_x),
+                    y: rng.random_range(1..max_y),
+                },
+                _ => Action::DrawAsciiLine {
+                    y: rng.random_range(1..max_y),
+                    x1: 1,
+                    x2: max_x,
+                    glyph: ["=", "-", "."].choose(&mut rng).unwrap().to_string(),
+                },
+            });
+        }
+
+        if !border_drawn {
+            return Ok(Action::DrawBorder);
+        }
+
+        let choice = rng.random_range(0..6);
+        Ok(match choice {
+            0 => Action::PlaceRock {
+                x: rng.random_range(1..max_x),
+                y: rng.random_range(1..max_y),
+                size: rng.random_range(1..=3),
+            },
+            1 => Action::PlaceMoss {
+                x: rng.random_range(1..max_x),
+                y: rng.random_range(1..max_y),
+            },
+            2 => Action::RakeLine {
+                y: rng.random_range(1..max_y),
+                x1: 1,
+                x2: max_x,
+            },
+            3 => Action::RakeRing {
+                cx: max_x / 2,
+                cy: max_y / 2,
+                radius: rng.random_range(2..6),
+            },
+            4 => Action::PlaceMandala {
+                x: max_x / 2,
+                y: max_y / 2,
+                style: rng.random_range(1..=6),
+            },
+            _ => Action::PlaceFlower {
+                x: rng.random_range(1..max_x),
+                y: rng.random_range(1..max_y),
+            },
+        })
     }
 }
