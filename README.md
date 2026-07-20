@@ -13,25 +13,9 @@ A turtle (`🐢`) physically walks across the canvas to carry out each instructi
 The garden renders right in your terminal, building up gradually at a relaxed pace.
 Every **30 minutes**, the garden finishes its cycle and begins anew.
 
-**Every run is unique.** A theme is chosen from a pool of **19 evocative styles** —
+**Every run is unique.** A theme is chosen from a pool of **20 evocative styles** —
 from classic *Three Mountain Sanzen* and *Moonlit Reef* to *Sacred Geometry Mandala*,
-*Enso Fractal Solitude*, the spontaneous **Tabula Rasa (Pure ASCII Muse)**, and the unbound **Wild Zones (Unbound Serenity)** — each guiding the LLM toward a distinct composition.
-
-## Credits
-
-- Built and signed by **ZeroClaw** 🦀 — a Rust-forged companion, tending gardens one rock at a time.
-- Enhanced by **Claude** (Anthropic, Claude Opus): Added dynamic per-session theme system, expanded ASCII glyph palette, stateful prompt engineering so the LLM progresses through border → raking → rocks → accents → completion, and error resilience with retry logic.
-- Updated & Expanded by **Antigravity** (Google DeepMind):
-  - Fixed `.env` API key configuration and switched to active OpenRouter free models (`tencent/hy3:free`).
-  - Added the **animated turtle (`🐢`)** that pathfinds across the grid to place items and rests (`💤`) between turns.
-  - Implemented **Crossterm Terminal Renderer & Rake Animation**: Replaced raw ANSI escape sequences with smooth `crossterm` screen management, zero screen flicker, left-to-right raking animations, and robust cursor hiding/showing (`CleanExit`).
-  - Implemented **State Persistence & Resume (`--resume`)**: JSON serialization (`GardenState`) saving and restoring garden state across sessions (`--state-file`), preserving grid contents, prompt counts, and theme choices.
-  - Built **Single-Step Debugging, Offline Simulation & Snapshots**: Added `--dry-run` (offline simulation without API calls), `--step` (single-action step mode), `--snapshot` (file export), and `--no-color` (plain text output).
-  - Implemented **rate-limiting pacing & session cycles** (6s pace between prompts, 30s rest every 10 prompts, 30-minute auto-reset loop, plus exponential backoff/retry on OpenRouter 400/429 limits).
-  - Added **minimalist ASCII/emoji mandala & fractal actions** (`place_mandala`, `rake_ring`) and 5 new geometric themes.
-  - Implemented **Dynamic Patterned Borders**: Each session is framed by one of **12 unique, aesthetically pleasing border patterns** (*Sacred Double Box*, *Seigaiha Ocean Waves*, *Sakura Blossom Garland*, *Starfield Lattice*, *Shimenawa Sacred Rope*, etc.) laid down by the turtle during the opening perimeter walk.
-  - Built **interactive startup menu (`-i`)** and full **CLI command option weaving (`clap`)**.
-  - Created **Tabula Rasa (Pure ASCII Muse)** & **Liberated Wild Zones**: Removed all forced dove (`🕊️`) or star visual persona restrictions from *Wild Zones*, giving the LLM true unbound freedom across all emoji and symbols while retaining peaceful boundaries.
+*Enso Fractal Solitude*, the spontaneous **Tabula Rasa (Pure ASCII Muse)**, the unbound **Wild Zones (Unbound Serenity)**, and now the deliberate **Gridwright (The Deliberate Grid as Craft)** — each guiding the LLM toward a distinct composition.
 
 ## How it works
 
@@ -62,9 +46,9 @@ cargo run -- -i
 ### Command-Line Flags
 You can pass your preferred theme, dimensions, state persistence, and debugging flags directly via CLI arguments:
 ```bash
-# Choose a specific theme by name substring or index (1-19):
+# Choose a specific theme by name substring or index (1-20):
 cargo run -- -t "Tabula Rasa"
-cargo run -- --theme 19
+cargo run -- --theme 20
 
 # Resume a previously saved garden session across restarts:
 cargo run -- --resume --state-file my_garden.json
@@ -81,7 +65,7 @@ cargo run -- --help
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
-| `--theme <THEME>` | `-t` | `random` | Theme name substring or index (`1-19`), or `random` |
+| `--theme <THEME>` | `-t` | `random` | Theme name substring or index (`1-20`), or `random` |
 | `--width <WIDTH>` | `-w` | `48` | Grid width in terminal columns |
 | `--height <HEIGHT>` | | `20` | Grid height in terminal rows |
 | `--pace <SECONDS>` | `-p` | `6` | Seconds between normal LLM prompts |
@@ -117,6 +101,7 @@ Each run selects or assigns one of **19 themes**:
 - **Yin-Yang Balance** *(✨ NEW)* — dual equilibrium dividing circular sand rings from textured gravel (`··`) and moss (`🌿`)
 - **Tabula Rasa (Pure ASCII Muse)** *(✨ NEW)* — complete rethink: ignores all zen garden instructions and emoji, giving the LLM pure ASCII sketching freedom (`place_ascii`, `draw_ascii_line`) across the blank canvas (`[*]`) based on what inspires it right now
 - **Wild Zones (Unbound Serenity)** *(✨ NEW)* — true liberation: all zen garden rules, raked sand, mandalas, and rigid borders are completely removed without any forced visual persona. Guided strictly by calm, peace, and serenity (zero profanity/threats/abuse), the LLM has absolute freedom across the open canvas (`place_glyph`, `draw_line`, `draw_ring`, `fill_box`, `clear_cell`) using any emoji or ASCII characters without influence from other themes
+- **Gridwright (The Deliberate Grid as Craft)** *(✨ NEW)* — pixel-perfect grid art where every cell is a deliberate choice. Uses precise geometric shapes (lines, circles, rectangles), runtime-selected palettes, and mathematical composition with no scaling, no smoothing, no interpolation—just pure, intentional placement on a clean grid. The LLM orchestrates pixel-by-pixel construction using explicit drawing actions (`SetPixel`, `DrawLine`, `DrawCircle`, `FillRectangle`) and color palette indices for controlled artistic expression.
 
 ## Free models only — enforced
 
@@ -157,5 +142,33 @@ In addition to `.env`, grid size (`--width`/`--height`), pacing (`--pace`), rate
 ## Layout
 
 - `src/garden.rs` — `Garden` grid, `GardenState` persistence (`serde`), `crossterm` colored rendering, `BorderPattern` (12 dynamic geometric/aesthetic border styles), `Action` enum (including `RakeRing` & `PlaceMandala`), turtle pathfinding, and 2-column glyph definitions.
-- `src/llm.rs` — OpenRouter client with exponential backoff & detailed JSON error logging, 19-theme pool, free-model enforcement, offline simulation (`--dry-run`), and liberated dynamic prompt engineering.
+- `src/llm.rs` — OpenRouter client with exponential backoff & detailed JSON error logging, 20-theme pool, free-model enforcement, offline simulation (`--dry-run`), and liberated dynamic prompt engineering.
 - `src/main.rs` — CLI parser (`clap`), interactive terminal menu (`-i`), `crossterm` screen management (`CleanExit` guard), single-step debugging (`--step`), state persistence loop, and 30-minute session lifecycle.
+- `src/vec.rs` — Point geometry, line drawing (Bresenham algorithm), circle generation (Midpoint Circle), distance calculations, and filled rectangle primitives for pixel-precise grid placement.
+- `src/color.rs` — RGB color management, 6 pre-defined palettes (monochrome, zen_earth, night_sky, vibrant_neon, warm_earth, gridwright_default), color blending, and palette quantization.
+- `src/canvas.rs` — 2D pixel grid rendering with drawing primitives (lines, circles, rectangles), ANSI 24-bit RGB color output, and `CanvasBuilder` fluent composition API.
+- `src/pixel_art.rs` — `PixelArtAction` enum for LLM-driven pixel art (SetPixel, DrawLine, DrawCircle, FillRectangle, etc.), `GridwrightConfig` for composition tuning, and executor for applying actions to canvas.
+- `src/gridwright_runner.rs` — End-to-end LLM orchestration for Gridwright sessions: OpenRouter API integration, exponential backoff retry logic, canvas preview rendering, and dry-run simulation mode.
+
+## Credits
+
+- Built and signed by **ZeroClaw** 🦀 — a Rust-forged companion, tending gardens one rock at a time.
+- Enhanced by **Claude** (Anthropic, Claude Opus): Added dynamic per-session theme system, expanded ASCII glyph palette, stateful prompt engineering so the LLM progresses through border → raking → rocks → accents → completion, and error resilience with retry logic.
+- Updated & Expanded by **Antigravity** (Google DeepMind):
+  - Fixed `.env` API key configuration and switched to active OpenRouter free models (`tencent/hy3:free`).
+  - Added the **animated turtle (`🐢`)** that pathfinds across the grid to place items and rests (`💤`) between turns.
+  - Implemented **Crossterm Terminal Renderer & Rake Animation**: Replaced raw ANSI escape sequences with smooth `crossterm` screen management, zero screen flicker, left-to-right raking animations, and robust cursor hiding/showing (`CleanExit`).
+  - Implemented **State Persistence & Resume (`--resume`)**: JSON serialization (`GardenState`) saving and restoring garden state across sessions (`--state-file`), preserving grid contents, prompt counts, and theme choices.
+  - Built **Single-Step Debugging, Offline Simulation & Snapshots**: Added `--dry-run` (offline simulation without API calls), `--step` (single-action step mode), `--snapshot` (file export), and `--no-color` (plain text output).
+  - Implemented **rate-limiting pacing & session cycles** (6s pace between prompts, 30s rest every 10 prompts, 30-minute auto-reset loop, plus exponential backoff/retry on OpenRouter 400/429 limits).
+  - Added **minimalist ASCII/emoji mandala & fractal actions** (`place_mandala`, `rake_ring`) and 5 new geometric themes.
+  - Implemented **Dynamic Patterned Borders**: Each session is framed by one of **12 unique, aesthetically pleasing border patterns** (*Sacred Double Box*, *Seigaiha Ocean Waves*, *Sakura Blossom Garland*, *Starfield Lattice*, *Shimenawa Sacred Rope*, etc.) laid down by the turtle during the opening perimeter walk.
+  - Built **interactive startup menu (`-i`)** and full **CLI command option weaving (`clap`)**.
+  - Created **Tabula Rasa (Pure ASCII Muse)** & **Liberated Wild Zones**: Removed all forced dove (`🕊️`) or star visual persona restrictions from *Wild Zones*, giving the LLM true unbound freedom across all emoji and symbols while retaining peaceful boundaries.
+- **Gridwright pixel art system** (GitHub Copilot): Architected a modular, LLM-driven pixel art framework as theme #20:
+  - Designed **vec.rs** (coordinate geometry with Bresenham lines, Midpoint Circle algorithm, distance metrics)
+  - Designed **color.rs** (RGB palette management, 6 pre-defined palettes, color blending and quantization)
+  - Designed **canvas.rs** (2D pixel grid with drawing primitives: lines, circles, rectangles, ANSI 24-bit RGB rendering, fluent builder pattern)
+  - Designed **pixel_art.rs** (LLM action types, GridwrightConfig composition tuning, system prompt generation, executor for canvas operations)
+  - Designed **gridwright_runner.rs** (end-to-end session orchestration via OpenRouter, exponential backoff retry logic, canvas preview rendering, dry-run simulation)
+  - Philosophy: pixel-perfect grid art where every cell is deliberate, no auto-scaling or smoothing—just pure mathematical composition under LLM control
