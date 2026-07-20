@@ -4,7 +4,7 @@
 use std::ops::{Add, Sub};
 
 /// A 2D point in grid space (x, y).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Point {
     pub x: usize,
     pub y: usize,
