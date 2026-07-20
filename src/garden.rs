@@ -12,28 +12,44 @@ pub enum Action {
     PlaceMoss { x: usize, y: usize },
     /// Scatter gravel across a horizontal span on a row.
     PlaceGravel { y: usize, x1: usize, x2: usize },
+    /// Place a cherry blossom accent at (x, y).
+    PlaceFlower { x: usize, y: usize },
+    /// Place a stone lantern at (x, y).
+    PlaceLantern { x: usize, y: usize },
     /// Draw a border frame around the whole garden.
     DrawBorder,
     /// Signal that the garden is complete.
     Done,
 }
 
-/// The ASCII zen garden grid.
+/// Glyphs — each is exactly 2 terminal columns wide for alignment.
+const EMPTY: &str = "  ";
+const BORDER: &str = "🎋";
+const RAKED: &str = "~~";
+const ROCK_S: &str = "🪨";
+const ROCK_M: &str = "🗿";
+const ROCK_L: &str = "🗿";
+const MOSS: &str = "🌿";
+const GRAVEL: &str = "··";
+const FLOWER: &str = "🌸";
+const LANTERN: &str = "🏮";
+
+/// The ASCII + emoji zen garden grid.
+/// Each cell is a 2-column-wide string so emojis and ASCII mix cleanly.
 pub struct Garden {
     pub width: usize,
     pub height: usize,
-    grid: Vec<Vec<char>>,
+    grid: Vec<Vec<String>>,
 }
 
 impl Garden {
     pub fn new(width: usize, height: usize) -> Self {
-        let grid = vec![vec![' '; width]; height];
+        let grid = vec![vec![EMPTY.to_string(); width]; height];
         Self { width, height, grid }
     }
 
-    /// Returns true if the cell is empty (not border, rock, moss, etc.).
     fn is_empty(&self, x: usize, y: usize) -> bool {
-        self.grid[y][x] == ' '
+        self.grid[y][x] == EMPTY
     }
 
     pub fn place_rock(&mut self, x: usize, y: usize, size: u8) {
@@ -41,11 +57,11 @@ impl Garden {
             return;
         }
         let glyph = match size.clamp(1, 3) {
-            1 => 'o',
-            2 => 'O',
-            _ => '@',
+            1 => ROCK_S,
+            2 => ROCK_M,
+            _ => ROCK_L,
         };
-        self.grid[y][x] = glyph;
+        self.grid[y][x] = glyph.to_string();
     }
 
     pub fn rake_line(&mut self, y: usize, x1: usize, x2: usize) {
@@ -55,7 +71,7 @@ impl Garden {
         let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
         for x in a..=b.min(self.width.saturating_sub(1)) {
             if self.is_empty(x, y) {
-                self.grid[y][x] = '~';
+                self.grid[y][x] = RAKED.to_string();
             }
         }
     }
@@ -65,7 +81,7 @@ impl Garden {
             return;
         }
         if self.is_empty(x, y) {
-            self.grid[y][x] = '*';
+            self.grid[y][x] = MOSS.to_string();
         }
     }
 
@@ -76,27 +92,47 @@ impl Garden {
         let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
         for x in a..=b.min(self.width.saturating_sub(1)) {
             if self.is_empty(x, y) {
-                self.grid[y][x] = '.';
+                self.grid[y][x] = GRAVEL.to_string();
             }
+        }
+    }
+
+    pub fn place_flower(&mut self, x: usize, y: usize) {
+        if y >= self.height || x >= self.width {
+            return;
+        }
+        if self.is_empty(x, y) {
+            self.grid[y][x] = FLOWER.to_string();
+        }
+    }
+
+    pub fn place_lantern(&mut self, x: usize, y: usize) {
+        if y >= self.height || x >= self.width {
+            return;
+        }
+        if self.is_empty(x, y) {
+            self.grid[y][x] = LANTERN.to_string();
         }
     }
 
     pub fn draw_border(&mut self) {
         for x in 0..self.width {
-            self.grid[0][x] = '#';
-            self.grid[self.height - 1][x] = '#';
+            self.grid[0][x] = BORDER.to_string();
+            self.grid[self.height - 1][x] = BORDER.to_string();
         }
         for y in 0..self.height {
-            self.grid[y][0] = '#';
-            self.grid[y][self.width - 1] = '#';
+            self.grid[y][0] = BORDER.to_string();
+            self.grid[y][self.width - 1] = BORDER.to_string();
         }
     }
 
     /// Render the garden to a string for terminal display.
     pub fn render(&self) -> String {
-        let mut out = String::with_capacity((self.width + 1) * self.height);
+        let mut out = String::new();
         for row in &self.grid {
-            out.extend(row.iter());
+            for cell in row {
+                out.push_str(cell);
+            }
             out.push('\n');
         }
         out

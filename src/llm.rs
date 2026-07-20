@@ -34,75 +34,75 @@ const FREE_MODELS: &[&str] = &[
 const THEMES: &[(&str, &str)] = &[
     (
         "Moonlit Reef",
-        "A nocturnal ocean scene. Place large central rock clusters as coral reefs \
-         surrounded by sweeping, wide raked sand curves. Leave calm open pools of \
-         empty space near the edges. Use moss accents sparingly as sea-foam.",
+        "A nocturnal ocean scene. Place rock clusters as coral reefs \
+         surrounded by sweeping raked sand curves. Use moss as sea-foam \
+         and flowers as bioluminescent blooms.",
     ),
     (
         "Dragon Tail Ripples",
-        "Long, flowing rake lines that sweep across most of the garden diagonally, \
-         like the wake of a dragon's tail. Rocks are placed in a loose S-curve. \
-         Gravel patches mark where the dragon rested.",
+        "Long flowing rake lines sweep across the garden diagonally, \
+         like the wake of a dragon. Rocks form a loose S-curve. \
+         Lanterns mark the dragon's resting spots.",
     ),
     (
         "Three Mountain Sanzen",
-        "Classic three-stone triadic composition (sanzon-seki). Place three prominent \
-         rock groups: one large central stone flanked by two smaller groups at \
-         asymmetric distances. Rake concentric sand ripples around each group.",
+        "Classic three-stone triadic composition. Place three prominent \
+         rock groups: one large central stone flanked by two smaller groups. \
+         Rake concentric sand ripples around each. Moss at the bases.",
     ),
     (
         "Autumn Sand Drift",
-        "Asymmetric gravel patches like wind-blown autumn leaves scattered across \
-         the sand. Small rocks dot the landscape. Rake lines flow from left to right \
-         with varying lengths, like wind patterns.",
+        "Wind-blown patterns. Rake lines flow left to right with varying \
+         lengths. Scatter flowers like fallen cherry petals. Small rocks \
+         dot the landscape. Gravel patches like dry streambeds.",
     ),
     (
         "Island Archipelago",
-        "Multiple isolated rock clusters as islands. Each island has 2-3 rocks of \
-         varying size with moss growing on them. Raked sand flows between islands \
-         like ocean currents. Use gravel as shallow shores.",
+        "Multiple isolated rock clusters as islands with moss growing on them. \
+         Raked sand flows between islands like ocean currents. \
+         Gravel as shallow shores. Lanterns guide the way.",
     ),
     (
         "Stepping Stone Path",
-        "A diagonal path of evenly-spaced single rocks from one corner toward the \
-         opposite. Raked sand flows perpendicular to the path. Moss grows along \
-         the path edges. Empty calm zones on either side.",
+        "A diagonal path of evenly-spaced rocks from one corner toward the \
+         opposite. Raked sand flows perpendicular to the path. Moss along \
+         path edges. Lanterns at the start and end.",
     ),
     (
         "Crane and Turtle",
-        "Two distinct rock groupings: one tall vertical arrangement (the crane) \
-         and one low wide arrangement (the turtle). Raked sand circles around both. \
-         Gravel connects them like a bridge.",
+        "Two distinct rock groupings: one vertical (crane) and one wide \
+         (turtle). Raked sand circles around both. Gravel connects them. \
+         Flowers accent the turtle's shell.",
     ),
     (
         "Zen Minimalist",
-        "Extreme restraint. Only 2-3 rocks placed with mathematical precision. \
-         Rake every interior row fully from edge to edge for uniform sand texture. \
-         Leave one small moss accent near a rock.",
+        "Extreme restraint. Only 2-3 rocks placed with precision. \
+         Rake most interior rows fully for uniform sand texture. \
+         One small moss accent. One lantern in a corner.",
     ),
     (
         "Forest Clearing",
-        "Dense moss patches along the top and bottom edges like tree canopy shadows. \
-         A central clearing of raked sand with a single prominent rock. Gravel \
-         paths lead inward from the sides.",
+        "Dense moss patches along top and bottom edges like canopy shadows. \
+         A central clearing of raked sand with a prominent rock. \
+         Flowers bloom at the edge of the tree line.",
     ),
     (
         "Whirlpool Basin",
-        "Raked lines of varying length create a spiral-like pattern converging on a \
-         central rock cluster. Shorter rake lines near the center, longer at the \
-         edges. Gravel marks the outer rim.",
+        "Raked lines of varying length converge on a central rock cluster. \
+         Shorter rakes near center, longer at edges. Gravel marks the outer \
+         rim. A lantern watches over the basin.",
     ),
     (
         "Scattered Stars",
-        "Many small rocks (size 1) placed across the garden like a star field. \
-         A few medium rocks as constellations. Minimal raking; mostly open \
-         empty space with small gravel patches.",
+        "Many small rocks scattered like a star field. A few larger rocks as \
+         constellations. Flowers as distant nebulae. Minimal raking. \
+         A lone lantern as the moon.",
     ),
     (
         "River Delta",
-        "Raked sand lines fan out from one side to the other like a river branching \
-         into a delta. Rocks are placed as riverbed stones. Moss grows at the \
-         river banks. Gravel fills shallow areas.",
+        "Raked sand lines fan from one side like a branching river. \
+         Rocks as riverbed stones. Moss at the banks. Gravel in shallow \
+         areas. Flowers bloom along the water's edge.",
     ),
 ];
 
@@ -149,8 +149,6 @@ impl Gardener {
         &self.theme_name
     }
 
-    /// Ask the LLM for the next action. `border_drawn` and `action_num` let
-    /// us adjust the prompt so the LLM doesn't get stuck repeating draw_border.
     pub async fn next_action(
         &self,
         state: &str,
@@ -160,14 +158,15 @@ impl Gardener {
         let max_x = self.width.saturating_sub(2);
         let max_y = self.height.saturating_sub(2);
 
-        // Build the available-actions block dynamically.
         let actions_block = if border_drawn {
             format!(
-                r#"Available actions (return ONE as raw JSON, no markdown, no commentary):
+                r#"Available actions (return ONE as raw JSON, no markdown, no extra text):
 {{"action": "rake_line", "y": <1-{max_y}>, "x1": <1-{max_x}>, "x2": <1-{max_x}>}}
 {{"action": "place_rock", "x": <1-{max_x}>, "y": <1-{max_y}>, "size": <1-3>}}
 {{"action": "place_moss", "x": <1-{max_x}>, "y": <1-{max_y}>}}
 {{"action": "place_gravel", "y": <1-{max_y}>, "x1": <1-{max_x}>, "x2": <1-{max_x}>}}
+{{"action": "place_flower", "x": <1-{max_x}>, "y": <1-{max_y}>}}
+{{"action": "place_lantern", "x": <1-{max_x}>, "y": <1-{max_y}>}}
 {{"action": "done"}}"#,
                 max_x = max_x, max_y = max_y,
             )
@@ -178,7 +177,6 @@ impl Gardener {
             )
         };
 
-        // Nudge toward completion when we've done enough actions.
         let completion_hint = if action_num >= 20 {
             "\nYou have placed many elements. Consider calling done soon if it looks complete."
         } else {
@@ -186,19 +184,26 @@ impl Gardener {
         };
 
         let system = format!(
-            "You are a master zen gardener composing a unique ASCII zen garden.\n\
+            "You are a master Japanese zen gardener composing a beautiful garden.\n\
              Canvas: {w} columns x {h} rows. Interior: x in 1..{max_x}, y in 1..{max_y}.\n\n\
+             The garden uses a mix of emoji and ASCII art:\n\
+             - 🎋 bamboo border\n\
+             - ~~ raked sand ripples\n\
+             - 🪨 small rock, 🗿 large rock\n\
+             - 🌿 moss, 🌸 cherry blossom, 🏮 stone lantern\n\
+             - ·· gravel path\n\n\
              SESSION THEME: \"{theme_name}\"\n\
              {theme_desc}\n\n\
              {actions_block}\n\n\
              RULES:\n\
              1. Use the FULL canvas. Spread actions across many different rows and columns.\n\
              2. Vary rake_line lengths: some span the full row, others are short segments.\n\
-             3. Rocks: size 1 gives o, size 2 gives O, size 3 gives @. Group or scatter per theme.\n\
-             4. Moss (*) goes near rocks or edges. Gravel (.) fills paths or shores.\n\
-             5. Aim for 15-25 total actions, then call done.\n\
-             6. NEVER repeat an action you already did. Each action should be DIFFERENT.\n\
-             7. Return ONLY one raw JSON object. No markdown fences, no explanation.{completion_hint}",
+             3. Rocks: size 1 (🪨), size 2 (🗿), size 3 (🗿). Group or scatter per theme.\n\
+             4. Moss 🌿 near rocks or edges. Flowers 🌸 as accents. Lanterns 🏮 as focal points.\n\
+             5. Gravel ·· for paths, shores, or texture.\n\
+             6. Aim for 15-25 total actions, then call done.\n\
+             7. NEVER repeat the same exact action. Each must be DIFFERENT.\n\
+             8. Return ONLY one raw JSON object. No markdown fences.{completion_hint}",
             w = self.width,
             h = self.height,
             max_x = max_x,

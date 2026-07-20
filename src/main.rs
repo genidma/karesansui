@@ -65,6 +65,8 @@ async fn main() -> Result<()> {
             Action::RakeLine { y, x1, x2 } => garden.rake_line(y, x1, x2),
             Action::PlaceMoss { x, y } => garden.place_moss(x, y),
             Action::PlaceGravel { y, x1, x2 } => garden.place_gravel(y, x1, x2),
+            Action::PlaceFlower { x, y } => garden.place_flower(x, y),
+            Action::PlaceLantern { x, y } => garden.place_lantern(x, y),
             Action::DrawBorder => {
                 garden.draw_border();
                 border_drawn = true;
