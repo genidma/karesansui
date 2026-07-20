@@ -35,16 +35,9 @@ artistic composition.
 - The LLM signals `done` when the garden feels complete (or a hard cap of 40
   actions ends the session).
 
-## Available actions
+## What will it make?
 
-| Action | Glyph | Description |
-|--------|-------|-------------|
-| `draw_border` | `#` | Frame around the garden edge |
-| `rake_line` | `~` | Horizontal line of raked sand |
-| `place_rock` | `o`/`O`/`@` | Rock (size 1/2/3) |
-| `place_moss` | `*` | Moss accent |
-| `place_gravel` | `.` | Gravel texture span |
-| `done` | — | Signal garden is complete |
+That is for the gardener to decide. Run it and see. 🍃
 
 ## Themes
 
