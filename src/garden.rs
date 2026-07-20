@@ -8,6 +8,10 @@ pub enum Action {
     PlaceRock { x: usize, y: usize, size: u8 },
     /// Rake a horizontal line of sand between two columns on a row.
     RakeLine { y: usize, x1: usize, x2: usize },
+    /// Place a patch of moss at (x, y).
+    PlaceMoss { x: usize, y: usize },
+    /// Scatter gravel across a horizontal span on a row.
+    PlaceGravel { y: usize, x1: usize, x2: usize },
     /// Draw a border frame around the whole garden.
     DrawBorder,
     /// Signal that the garden is complete.
@@ -25,6 +29,11 @@ impl Garden {
     pub fn new(width: usize, height: usize) -> Self {
         let grid = vec![vec![' '; width]; height];
         Self { width, height, grid }
+    }
+
+    /// Returns true if the cell is empty (not border, rock, moss, etc.).
+    fn is_empty(&self, x: usize, y: usize) -> bool {
+        self.grid[y][x] == ' '
     }
 
     pub fn place_rock(&mut self, x: usize, y: usize, size: u8) {
@@ -45,9 +54,29 @@ impl Garden {
         }
         let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
         for x in a..=b.min(self.width.saturating_sub(1)) {
-            // Don't overwrite rocks.
-            if self.grid[y][x] == ' ' {
+            if self.is_empty(x, y) {
                 self.grid[y][x] = '~';
+            }
+        }
+    }
+
+    pub fn place_moss(&mut self, x: usize, y: usize) {
+        if y >= self.height || x >= self.width {
+            return;
+        }
+        if self.is_empty(x, y) {
+            self.grid[y][x] = '*';
+        }
+    }
+
+    pub fn place_gravel(&mut self, y: usize, x1: usize, x2: usize) {
+        if y >= self.height {
+            return;
+        }
+        let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
+        for x in a..=b.min(self.width.saturating_sub(1)) {
+            if self.is_empty(x, y) {
+                self.grid[y][x] = '.';
             }
         }
     }
