@@ -13,9 +13,9 @@ A turtle (`🐢`) physically walks across the canvas to carry out each instructi
 The garden renders right in your terminal, building up gradually at a relaxed pace.
 Every **30 minutes**, the garden finishes its cycle and begins anew.
 
-**Every run is unique.** A theme is chosen from a pool of **18 evocative styles** —
+**Every run is unique.** A theme is chosen from a pool of **19 evocative styles** —
 from classic *Three Mountain Sanzen* and *Moonlit Reef* to *Sacred Geometry Mandala*,
-*Enso Fractal Solitude*, and the spontaneous **Tabula Rasa (Pure ASCII Muse)** — each guiding the LLM toward a distinct composition.
+*Enso Fractal Solitude*, the spontaneous **Tabula Rasa (Pure ASCII Muse)**, and the unbound **Wild Zones (Unbound Serenity)** — each guiding the LLM toward a distinct composition.
 
 ## Credits
 
@@ -58,9 +58,9 @@ cargo run -- -i
 ### Command-Line Flags
 You can also pass your preferred theme, dimensions, and timing settings directly via CLI arguments:
 ```bash
-# Choose a specific theme by name substring or index (1-18):
+# Choose a specific theme by name substring or index (1-19):
 cargo run -- -t "Tabula Rasa"
-cargo run -- --theme 18
+cargo run -- --theme 19
 
 # Customize canvas size and pacing speeds:
 cargo run -- --width 54 --height 22 --pace 4 --rest 15
@@ -71,7 +71,7 @@ cargo run -- --help
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
-| `--theme <THEME>` | `-t` | `random` | Theme name substring or index (`1-18`), or `random` |
+| `--theme <THEME>` | `-t` | `random` | Theme name substring or index (`1-19`), or `random` |
 | `--width <WIDTH>` | `-w` | `48` | Grid width in terminal columns |
 | `--height <HEIGHT>` | | `20` | Grid height in terminal rows |
 | `--pace <SECONDS>` | `-p` | `6` | Seconds between normal LLM prompts |
@@ -80,7 +80,7 @@ cargo run -- --help
 
 ## Themes
 
-Each run selects or assigns one of **18 themes**:
+Each run selects or assigns one of **19 themes**:
 
 - **Moonlit Reef** — coral reef clusters with sweeping sand curves
 - **Dragon Tail Ripples** — flowing diagonal rake lines in an S-curve
@@ -100,6 +100,7 @@ Each run selects or assigns one of **18 themes**:
 - **Fractal Starfield Void** *(✨ NEW)* — self-similar lattice of stars (`✦ `) and geometric crests (`❖ `)
 - **Yin-Yang Balance** *(✨ NEW)* — dual equilibrium dividing circular sand rings from textured gravel (`··`) and moss (`🌿`)
 - **Tabula Rasa (Pure ASCII Muse)** *(✨ NEW)* — complete rethink: ignores all zen garden instructions and emoji, giving the LLM pure ASCII sketching freedom (`place_ascii`, `draw_ascii_line`) across the blank canvas (`[*]`) based on what inspires it right now
+- **Wild Zones (Unbound Serenity)** *(✨ NEW)* — absolute freedom without rules (guarded strictly by common sense, peace, calm, and zero profanity/threats/abuse), allowing the LLM to freely combine pure ASCII art, geometric mandalas, raked ripples, zen garden accents, and borders anywhere across the canvas
 
 ## Free models only — enforced
 
@@ -138,5 +139,5 @@ In addition to `.env`, grid size (`--width`/`--height`), pacing (`--pace`), and 
 ## Layout
 
 - `src/garden.rs` — `Garden` grid, `BorderPattern` (12 dynamic geometric/aesthetic border styles), `Action` enum (including `RakeRing` & `PlaceMandala`), turtle pathfinding, and 2-column glyph definitions.
-- `src/llm.rs` — OpenRouter client, 17-theme pool, free-model enforcement, and dynamic prompt engineering.
+- `src/llm.rs` — OpenRouter client, 19-theme pool, free-model enforcement, and dynamic prompt engineering.
 - `src/main.rs` — CLI parser (`clap`), interactive terminal menu (`-i`), slow turtle animation loop (`animate_walk`), and 30-minute session lifecycle.

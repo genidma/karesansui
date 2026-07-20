@@ -16,7 +16,7 @@ const SESSION_DURATION: Duration = Duration::from_secs(30 * 60);
 #[command(name = "karesansui")]
 #[command(about = "A minimalist ASCII & emoji zen garden, mandala & fractal generator tended by a turtle and an LLM.")]
 pub struct CliArgs {
-    /// Choose a specific theme by name or index (1-18), or "random"
+    /// Choose a specific theme by name or index (1-19), or "random"
     #[arg(short, long)]
     pub theme: Option<String>,
 
@@ -155,9 +155,10 @@ async fn main() -> Result<()> {
         let theme = gardener.theme_name().to_string();
         let border_name = garden.border_pattern.name;
         let is_tabula = gardener.is_tabula_rasa();
+        let is_wild = gardener.is_wild_zones();
 
         let mut consecutive_errors = 0;
-        let mut border_drawn = is_tabula;
+        let mut border_drawn = is_tabula || is_wild;
         let mut prompt_count: usize = 0;
 
         if is_tabula {
@@ -168,6 +169,9 @@ async fn main() -> Result<()> {
         if is_tabula {
             println!("✨ Tabula Rasa — Theme: \"{theme}\"\n");
             println!("   [*] The ASCII muse is waking up to sketch across the canvas...\n");
+        } else if is_wild {
+            println!("🌊 Wild Zones — Theme: \"{theme}\"\n");
+            println!("   🐢 The turtle enters the unbound zone of absolute freedom and serenity...\n");
         } else {
             println!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"\n");
             println!("   🐢 The turtle is waking up to tend the garden...\n");
@@ -178,6 +182,8 @@ async fn main() -> Result<()> {
             let state = garden.render();
             let header = if is_tabula {
                 format!("✨ Tabula Rasa — Theme: \"{theme}\"  [prompt #{prompt_count}]")
+            } else if is_wild {
+                format!("🌊 Wild Zones — Theme: \"{theme}\"  [prompt #{prompt_count}]")
             } else {
                 format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  [prompt #{prompt_count}]")
             };
@@ -200,14 +206,16 @@ async fn main() -> Result<()> {
                 }
             };
 
-            // Skip duplicate draw_border calls.
-            if matches!(action, Action::DrawBorder) && border_drawn {
+            // Skip duplicate draw_border calls for standard themes.
+            if matches!(action, Action::DrawBorder) && border_drawn && !is_wild {
                 continue;
             }
 
             prompt_count += 1;
             let header = if is_tabula {
                 format!("✨ Tabula Rasa — Theme: \"{theme}\"  [prompt #{prompt_count} — [*] sketching...]")
+            } else if is_wild {
+                format!("🌊 Wild Zones — Theme: \"{theme}\"  [prompt #{prompt_count} — 🐢 creating...]")
             } else {
                 format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  [prompt #{prompt_count} — 🐢 building...]")
             };
@@ -360,6 +368,8 @@ async fn main() -> Result<()> {
                     for remaining in (1..=20).rev() {
                         let h = if is_tabula {
                             format!("✨ Tabula Rasa — \"{theme}\" — Complete! [z] admiring ({remaining}s until reset)")
+                        } else if is_wild {
+                            format!("🌊 Wild Zones — \"{theme}\" — Complete! 💤 admiring ({remaining}s until reset)")
                         } else {
                             format!("🌿 karesansui — \"{theme}\" | Border: \"{border_name}\" — Complete! 💤 admiring ({remaining}s until reset)")
                         };
@@ -385,6 +395,8 @@ async fn main() -> Result<()> {
                 };
                 let h = if is_tabula {
                     format!("✨ Tabula Rasa — Theme: \"{theme}\"  {status}")
+                } else if is_wild {
+                    format!("🌊 Wild Zones — Theme: \"{theme}\"  {status}")
                 } else {
                     format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  {status}")
                 };
