@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
     let model = std::env::var("OPENROUTER_MODEL")
-        .unwrap_or_else(|_| "google/gemini-flash-8b:free".to_string());
+        .unwrap_or_else(|_| "tencent/hy3:free".to_string());
 
     let mut garden = Garden::new(WIDTH, HEIGHT);
     let gardener = Gardener::new(model, WIDTH, HEIGHT)?;

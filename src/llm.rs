@@ -27,19 +27,15 @@ struct ChatMessageOut {
     content: String,
 }
 
-/// Models that are FREE on OpenRouter. The gardener will ONLY ever call one of
-/// these. Anything else (including paid models) is rejected at construction
-/// time, so this binary can never accidentally spend credits.
 const FREE_MODELS: &[&str] = &[
-    "google/gemini-flash-8b:free",
-    "meta-llama/llama-3.1-8b-instruct:free",
-    "meta-llama/llama-3.2-3b-instruct:free",
-    "deepseek/deepseek-chat-v3-0324:free",
-    "qwen/qwen2.5-7b-instruct:free",
-    "microsoft/phi-3-mini-128k-instruct:free",
+    "tencent/hy3:free",
+    "google/gemma-4-31b-it:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "poolside/laguna-xs-2.1:free",
+    "openai/gpt-oss-20b:free",
+    "cohere/north-mini-code:free",
 ];
 
-/// Minimal OpenRouter client. Reads OPENROUTER_API_KEY from env (via dotenvy).
 pub struct Gardener {
     client: reqwest::Client,
     api_key: String,
@@ -53,17 +49,14 @@ impl Gardener {
         let api_key = std::env::var("OPENROUTER_API_KEY")
             .map_err(|_| anyhow::anyhow!("OPENROUTER_API_KEY not set (add it to .env)"))?;
 
-        // Enforce free-tier only. Fall back to the default free model if the
-        // requested one isn't on the allowlist (and warn), rather than silently
-        // allowing a paid model through.
         let requested = model.into();
         let model = if FREE_MODELS.contains(&requested.as_str()) {
             requested
         } else {
             eprintln!(
-                "⚠ model '{requested}' is not on the free allowlist; using default free model instead"
+                "⚠ model {requested} is not on the free allowlist; using default free model instead"
             );
-            "google/gemini-flash-8b:free".to_string()
+            "tencent/hy3:free".to_string()
         };
 
         Ok(Self {
@@ -75,12 +68,11 @@ impl Gardener {
         })
     }
 
-    /// Ask the LLM for the next action given the current garden state.
     pub async fn next_action(&self, state: &str) -> Result<Action> {
         let system = format!(
             "You are the gardener of an ASCII zen garden of size {w}x{h}. \
              Decide the NEXT single action to slowly build a peaceful, balanced garden. \
-             Return ONLY a JSON object with one of these shapes:\n\
+             Return ONLY valid raw JSON with one of these shapes (no markdown code blocks, no explanation):\n\
              {{\"action\":\"place_rock\",\"x\":<0-{xmax}>,\"y\":<0-{ymax}>,\"size\":<1-3>}}\n\
              {{\"action\":\"rake_line\",\"y\":<0-{ymax}>,\"x1\":<0-{xmax}>,\"x2\":<0-{xmax}>}}\n\
              {{\"action\":\"draw_border\"}}\n\
@@ -101,8 +93,7 @@ impl Gardener {
                 { "role": "system", "content": system },
                 { "role": "user", "content": user }
             ],
-            "response_format": { "type": "json_object" },
-            "temperature": 0.8,
+            "temperature": 0.7,
         });
 
         let resp = self
@@ -125,8 +116,19 @@ impl Gardener {
             .map(|c| c.message.content.clone())
             .ok_or_else(|| anyhow::anyhow!("no choices returned from OpenRouter"))?;
 
-        let action: Action = serde_json::from_str(&content)
-            .map_err(|e| anyhow::anyhow!("failed to parse LLM action '{content}': {e}"))?;
+        // Strip ```json markdown wrappers if the model includes them
+        let clean = content
+            .trim()
+            .strip_prefix("```json")
+            .unwrap_or(content.trim())
+            .strip_prefix("```")
+            .unwrap_or(content.trim())
+            .strip_suffix("```")
+            .unwrap_or(content.trim())
+            .trim();
+
+        let action: Action = serde_json::from_str(clean)
+            .map_err(|e| anyhow::anyhow!("failed to parse LLM action {clean}: {e}"))?;
         Ok(action)
     }
 }
