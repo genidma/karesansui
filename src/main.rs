@@ -16,7 +16,7 @@ const SESSION_DURATION: Duration = Duration::from_secs(30 * 60);
 #[command(name = "karesansui")]
 #[command(about = "A minimalist ASCII & emoji zen garden, mandala & fractal generator tended by a turtle and an LLM.")]
 pub struct CliArgs {
-    /// Choose a specific theme by name or index (1-17), or "random"
+    /// Choose a specific theme by name or index (1-18), or "random"
     #[arg(short, long)]
     pub theme: Option<String>,
 
