@@ -74,6 +74,7 @@ impl Garden {
         self.grid[y][x] = glyph.to_string();
     }
 
+    #[allow(dead_code)]
     pub fn rake_line(&mut self, y: usize, x1: usize, x2: usize) {
         if y >= self.height {
             return;
@@ -95,6 +96,7 @@ impl Garden {
         }
     }
 
+    #[allow(dead_code)]
     pub fn place_gravel(&mut self, y: usize, x1: usize, x2: usize) {
         if y >= self.height {
             return;
@@ -125,6 +127,7 @@ impl Garden {
         }
     }
 
+    #[allow(dead_code)]
     pub fn draw_border(&mut self) {
         for x in 0..self.width {
             self.grid[0][x] = BORDER.to_string();
