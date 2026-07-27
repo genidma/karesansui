@@ -7,6 +7,28 @@ use crate::garden::Action;
 
 const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 
+/// How many prior JSON actions to include in each LLM prompt.
+pub const RECENT_ACTIONS_LIMIT: usize = 10;
+
+fn format_action_history(recent_actions: &[Action]) -> String {
+    if recent_actions.is_empty() {
+        return String::new();
+    }
+    let lines: Vec<String> = recent_actions
+        .iter()
+        .enumerate()
+        .filter_map(|(i, action)| {
+            serde_json::to_string(action)
+                .ok()
+                .map(|json| format!("{}. {json}", i + 1))
+        })
+        .collect();
+    format!(
+        "Recent actions (do NOT repeat these exact actions):\n{}\n\n",
+        lines.join("\n")
+    )
+}
+
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct ORResponse {
@@ -240,7 +262,9 @@ impl Gardener {
         state: &str,
         border_drawn: bool,
         action_num: usize,
+        recent_actions: &[Action],
     ) -> Result<Action> {
+        let history = format_action_history(recent_actions);
         let (system, user) = if self.is_tabula_rasa() {
             let max_x = self.width.saturating_sub(1);
             let max_y = self.height.saturating_sub(1);
@@ -283,7 +307,10 @@ impl Gardener {
                 actions_block = actions_block,
                 completion_hint = completion_hint,
             );
-            let usr = format!("Current canvas (action #{action_num}):\n{state}\nNext action?", action_num = action_num);
+            let usr = format!(
+                "{history}Current canvas (action #{action_num}):\n{state}\nNext action?",
+                action_num = action_num,
+            );
             (sys, usr)
         } else if self.is_wild_zones() {
             let max_x = self.width.saturating_sub(1);
@@ -327,7 +354,10 @@ impl Gardener {
                 actions_block = actions_block,
                 completion_hint = completion_hint,
             );
-            let usr = format!("Current wild zone (action #{action_num}):\n{state}\nNext action?", action_num = action_num);
+            let usr = format!(
+                "{history}Current wild zone (action #{action_num}):\n{state}\nNext action?",
+                action_num = action_num,
+            );
             (sys, usr)
         } else {
             let max_x = self.width.saturating_sub(2);
@@ -390,8 +420,10 @@ impl Gardener {
                 completion_hint = completion_hint,
             );
 
-            let usr = format!("Current garden (action #{action_num}):\n{state}\nNext action?",
-                action_num = action_num);
+            let usr = format!(
+                "{history}Current garden (action #{action_num}):\n{state}\nNext action?",
+                action_num = action_num,
+            );
             (sys, usr)
         };
 

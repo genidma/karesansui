@@ -291,6 +291,7 @@ async fn main() -> Result<()> {
         }
 
         let mut consecutive_errors = 0;
+        let mut recent_actions: Vec<Action> = Vec::new();
         let mut border_drawn = is_tabula || is_wild || is_resumed;
 
         if is_tabula {
@@ -325,7 +326,10 @@ async fn main() -> Result<()> {
             };
             render_screen(&header, &garden, args.no_color)?;
 
-            let action = match gardener.next_action(&state, border_drawn, prompt_count).await {
+            let action = match gardener
+                .next_action(&state, border_drawn, prompt_count, &recent_actions)
+                .await
+            {
                 Ok(a) => {
                     consecutive_errors = 0;
                     a
@@ -346,6 +350,10 @@ async fn main() -> Result<()> {
             }
 
             prompt_count += 1;
+            recent_actions.push(action.clone());
+            if recent_actions.len() > llm::RECENT_ACTIONS_LIMIT {
+                recent_actions.drain(0..recent_actions.len() - llm::RECENT_ACTIONS_LIMIT);
+            }
             let header = if is_tabula {
                 format!("✨ Tabula Rasa — Theme: \"{theme}\"  [prompt #{prompt_count} — [*] sketching...]")
             } else if is_wild {
