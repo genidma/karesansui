@@ -106,3 +106,18 @@
 | | - All prompts rewritten for one-shot batch mode (array of actions, not single action) |
 | | - Added `parse_action_batch()` and `strip_markdown_fence()` to `llm.rs` for array deserialization |
 | | - Dry-run simulation returns full batches of actions matching each theme |
+
+---
+
+## opencode/big-pickle — Fourth Session (Resilience & Continuity)
+
+| | |
+|---|---|
+| **Source** | opencode/big-pickle (via opencode on claude.ai) |
+| **Date** | 2026-07-28 |
+| **Changes** | Made the app crash-proof and continuous: |
+| | - `compose_artwork()` retries up to 3 times with increasingly strict JSON-prompting on parse failure |
+| | - Switched main loop to infinite `'session` loop — after admiring, garden resets and generates again automatically |
+| | - Added `Garden::reset()` to clear canvas, reset turtle, pick new border pattern between pieces |
+| | - App is now fully resilient: logs malformed JSON, retries LLM, never crashes on bad output |
+| | - Ctrl+C cleanly exits from any phase (composition, animation, or admiring) |

@@ -78,6 +78,7 @@ impl LlmClient {
                     .header("X-Title", title);
             }
 
+            log::info!("Sending LLM request to {} with model {} (attempt {attempt}/{MAX_RETRY_ATTEMPTS})...", self.api_url, self.model);
             let resp = req.send().await;
 
             let resp = match resp {

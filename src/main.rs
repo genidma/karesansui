@@ -208,10 +208,23 @@ async fn main() -> Result<()> {
         // Wait for the LLM to compose the full artwork — keep trying until success
         let actions = loop {
             if shutdown.load(Ordering::SeqCst) { break 'session; }
-            println!("⏳ Asking the LLM to compose a complete piece (may take 1-3 minutes)...");
+            println!("⏳ Asking the LLM to compose a complete piece...");
             let state = garden.render();
             let start = Instant::now();
-            match gardener.compose_artwork(&state).await {
+            // Print elapsed every 30s during the LLM call so user knows it's still working
+            let heartbeat = {
+                let shutdown = shutdown.clone();
+                tokio::spawn(async move {
+                    for i in 1..20 {
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                        if shutdown.load(Ordering::SeqCst) { break; }
+                        log::info!("Still waiting for LLM response... (elapsed: {}s)", i * 30);
+                    }
+                })
+            };
+            let result = gardener.compose_artwork(&state).await;
+            heartbeat.abort();
+            match result {
                 Ok(actions) if !actions.is_empty() => {
                     log::info!("LLM composed {} actions in {:.1}s", actions.len(), start.elapsed().as_secs_f64());
                     break actions;
