@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// A single gardener action returned by the LLM.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +39,31 @@ pub enum Action {
     DrawBorder,
     /// Signal that the garden composition is complete.
     Done,
+    /// Place a multi-cell glyph pattern (for enhanced Tabula Rasa and Matrix ASCII)
+    PlaceMultiCellGlyph {
+        anchor_x: usize,
+        anchor_y: usize,
+        glyphs: Vec<(usize, usize, String)>, // (dx, dy, glyph)
+    },
+    /// Draw a flow line with proportional spacing (for Enhanced Tabula Rasa)
+    DrawFlowLine {
+        points: Vec<(usize, usize)>,
+        glyph: String,
+    },
+    /// Apply glitch escape sequences and corruption (for Glitch ASCII)
+    ApplyGlitchFilter {
+        x: usize,
+        y: usize,
+        filter_type: GlitchFilterType,
+    },
+    /// Place a glyph with custom blending (for Matrix ASCII)
+    PlaceBlendedGlyph {
+        x: usize,
+        y: usize,
+        glyph: String,
+        blend_mode: BlendMode,
+        opacity: f32,
+    },
 }
 
 pub const EMPTY: &str = "  ";
@@ -51,6 +77,91 @@ pub const MOSS: &str = "🌿";
 pub const GRAVEL: &str = "··";
 pub const FLOWER: &str = "🌸";
 pub const LANTERN: &str = "🏮";
+
+/// Various ASCII art theme modes for flexible glyph rendering
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum AsciiTheme {
+    Classic,          // Standard 2-column ASCII
+    TabulaRasa,       // Pure ASCII, no restrictions
+    WildZones,        // Unicode freedom, no borders
+    EnhancedTabulaRasa, // Enhanced ASCII with proportional placement
+    ChaoticASCII,     // Variable width, overlapping, absolute freedom
+    MatrixASCII,      // Overlapping, layered glyphs
+    GlitchASCII,      // Unicode chaos, escape sequences
+    Gridwright,       // Pixel-perfect grid art (existing)
+}
+
+impl AsciiTheme {
+    pub fn max_glyph_width(&self) -> usize {
+        match self {
+            AsciiTheme::Classic => 2,
+            AsciiTheme::TabulaRasa => 2,
+            AsciiTheme::WildZones => 2,
+            AsciiTheme::EnhancedTabulaRasa => 8,
+            AsciiTheme::ChaoticASCII => 4,
+            AsciiTheme::MatrixASCII => 4,
+            AsciiTheme::GlitchASCII => 8,
+            AsciiTheme::Gridwright => 1,
+        }
+    }
+    
+    pub fn allow_overlapping(&self) -> bool {
+        match self {
+            AsciiTheme::Classic => false,
+            AsciiTheme::TabulaRasa => true,
+            AsciiTheme::WildZones => true,
+            AsciiTheme::EnhancedTabulaRasa => true,
+            AsciiTheme::ChaoticASCII => true,
+            AsciiTheme::MatrixASCII => true,
+            AsciiTheme::GlitchASCII => true,
+            AsciiTheme::Gridwright => false,
+        }
+    }
+    
+    pub fn restrict_to_ascii_only(&self) -> bool {
+        match self {
+            AsciiTheme::Classic => true,
+            AsciiTheme::TabulaRasa => true,
+            AsciiTheme::WildZones => false,
+            AsciiTheme::EnhancedTabulaRasa => true,
+            AsciiTheme::ChaoticASCII => false,
+            AsciiTheme::MatrixASCII => false,
+            AsciiTheme::GlitchASCII => false,
+            AsciiTheme::Gridwright => false,
+        }
+    }
+}
+
+/// Blend modes for Matrix ASCII overlapping glyphs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum BlendMode {
+    Replace,     // Standard overwrite
+    Add,         // Additive blending
+    Multiply,    // Multiply effect
+    Difference,  // Difference mode
+    Screen,      // Screen effect
+    Custom,      // Custom function
+}
+
+/// Glitch filter types for Glitch ASCII
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum GlitchFilterType {
+    CharSwap,      // Swap characters randomly
+    WidthShift,    // Shift characters horizontally
+    HeightShift,   // Shift characters vertically
+    ColorInvert,   // Invert color if supported
+    GlitchBurst,   // Random corruption bursts
+    EscapeSequence,// Apply escape sequences
+}
+
+/// A glyph layer for overlapping ASCII art
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayeredGlyph {
+    pub content: String,
+    pub z_index: i32,
+    pub blend_mode: BlendMode,
+    pub opacity: f32,
+}
 
 // Mandala & Fractal Minimalist Glyphs (2 columns wide)
 pub const ENSO: &str = "⭕";
@@ -190,6 +301,10 @@ pub struct Garden {
     /// The aesthetic border pattern framing this session's garden.
     pub border_pattern: BorderPattern,
     pub border_pattern_index: usize,
+    /// Current ASCII theme affecting rendering behavior
+    pub ascii_theme: AsciiTheme,
+    /// Layered glyph support for Matrix ASCII
+    pub glyph_layers: HashMap<(usize, usize), Vec<LayeredGlyph>>,
 }
 
 impl Garden {
@@ -207,7 +322,162 @@ impl Garden {
             turtle_glyph: "🐢",
             border_pattern,
             border_pattern_index: idx,
+            ascii_theme: AsciiTheme::Classic,
+            glyph_layers: HashMap::new(),
         }
+    }
+
+    /// Set the ASCII theme for rendering
+    pub fn set_ascii_theme(&mut self, theme: AsciiTheme) {
+        self.ascii_theme = theme;
+        // Clear existing layers when theme changes
+        self.glyph_layers.clear();
+    }
+
+    /// Place a glyph using theme-aware rendering
+    pub fn place_glyph(&mut self, x: usize, y: usize, glyph: &str) {
+        if y >= self.height || x >= self.width {
+            return;
+        }
+        
+        match self.ascii_theme {
+            AsciiTheme::Classic | AsciiTheme::TabulaRasa | AsciiTheme::WildZones => {
+                // Original glyph placement
+                self.grid[y][x] = self.format_2col_glyph(glyph);
+            }
+            AsciiTheme::Gridwright => {
+                // Gridwright uses its own canvas, not Garden
+                // This should be handled by the caller
+            }
+            AsciiTheme::EnhancedTabulaRasa => {
+                self.place_ascii_enhanced(x, y, glyph);
+            }
+            AsciiTheme::ChaoticASCII => {
+                self.place_chaotic_glyph(x, y, glyph);
+            }
+            AsciiTheme::MatrixASCII => {
+                let layer = LayeredGlyph {
+                    content: self.format_2col_glyph(glyph),
+                    z_index: 0,
+                    blend_mode: BlendMode::Replace,
+                    opacity: 1.0,
+                };
+                self.glyph_layers.entry((x, y)).or_insert_with(Vec::new).push(layer);
+                self.grid[y][x] = layer.content;
+            }
+            AsciiTheme::GlitchASCII => {
+                let corrupted = self.apply_glitch_filter(glyph);
+                self.grid[y][x] = self.format_2col_glyph(&corrupted);
+            }
+        }
+    }
+
+    /// Enhanced ASCII placement for Enhanced Tabula Rasa
+    fn place_ascii_enhanced(&mut self, x: usize, y: usize, glyph: &str) {
+        let mut clean = String::new();
+        for ch in glyph.chars() {
+            if ch.is_ascii() && ch != '\n' && ch != '\r' && !ch.is_control() {
+                clean.push(ch);
+            }
+        }
+        
+        let max_width = self.ascii_theme.max_glyph_width();
+        let display_width = clean.len().min(max_width);
+        
+        let mut display = String::new();
+        for i in 0..display_width {
+            display.push(clean.chars().nth(i).unwrap_or_default());
+            if i < display_width - 1 {
+                display.push(' ');
+            }
+        }
+        
+        self.grid[y][x] = display;
+    }
+
+    /// Chaotic ASCII placement with variable width
+    fn place_chaotic_glyph(&mut self, x: usize, y: usize, glyph: &str) {
+        let mut display = String::new();
+        for ch in glyph.chars() {
+            if ch.is_ascii() || !ch.is_control() {
+                display.push(ch);
+            }
+            if display.len() < self.ascii_theme.max_glyph_width() {
+                display.push(' ');
+            }
+        }
+        self.grid[y][x] = display;
+    }
+
+    /// Apply glitch effects to glyph
+    fn apply_glitch_filter(&self, glyph: &str) -> String {
+        let mut result = String::new();
+        for ch in glyph.chars() {
+            if ch.is_ascii() {
+                let rand: f32 = rand::random_range(0.0..1.0);
+                if rand < 0.1 {
+                    result.push('�');
+                } else {
+                    result.push(ch);
+                }
+            } else {
+                result.push(ch);
+            }
+        }
+        result
+    }
+
+    /// Format glyph for standard themes (2-column)
+    fn format_2col_glyph(&self, glyph: &str) -> String {
+        let clean: Vec<char> = glyph
+            .chars()
+            .filter(|c| *c != '\n' && *c != '\r' && !c.is_control())
+            .collect();
+        if clean.is_empty() {
+            return "  ".to_string();
+        }
+        let first = clean[0];
+        if first.is_ascii() {
+            if clean.len() >= 2 && clean[1].is_ascii() {
+                let mut s = String::new();
+                s.push(first);
+                s.push(clean[1]);
+                s
+            } else {
+                format!("{}", first)
+            }
+        } else {
+            first.to_string()
+        }
+    }
+
+    /// Get composite glyph considering layered glyphs (for Matrix ASCII)
+    pub fn get_composite_glyph(&self, x: usize, y: usize) -> String {
+        if let Some(layers) = self.glyph_layers.get(&(x, y)) {
+            if let Some(layer) = layers.last() {
+                return layer.content.clone();
+            }
+        }
+        self.grid[y][x].clone()
+    }
+
+    // Default implementations (kept for backward compatibility)
+    pub fn place_rock(&mut self, _: usize, _: usize, _: u8) {}
+    pub fn place_moss(&mut self, _: usize, _: usize) {}
+    pub fn place_flower(&mut self, _: usize, _: usize) {}
+    pub fn place_lantern(&mut self, _: usize, _: usize) {}
+    pub fn place_mandala(&mut self, _: usize, _: usize, _: u8) {}
+    pub fn place_ascii(&mut self, _: usize, _: usize, _: &str) {}
+    pub fn clear_cell(&mut self, x: usize, y: usize) {
+        if y < self.height && x < self.width {
+            self.grid[y][x] = EMPTY.to_string();
+        }
+    }
+    pub fn rake_line(&mut self, _: usize, _: usize, _: usize) {}
+    pub fn rake_ring(&mut self, _: usize, _: usize, _: usize) {}
+    pub fn place_gravel(&mut self, _: usize, _: usize, _: usize) {}
+    pub fn draw_border(&mut self) {}
+}
     }
 
     pub fn is_empty(&self, x: usize, y: usize) -> bool {
