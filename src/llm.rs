@@ -37,6 +37,12 @@ const FREE_MODELS: &[&str] = &[
 
 pub const THEMES: &[(&str, &str)] = &[
     (
+        "Creative Freedom",
+        "Unlimited creative ASCII art across an open terminal canvas. \
+         No borders, no garden rules, no constraints — pure creative \
+         expression with any emoji or ASCII characters using all available drawing actions.",
+    ),
+    (
         "Moonlit Reef",
         "A nocturnal ocean scene. Place rock clusters as coral reefs \
          surrounded by sweeping raked sand curves. Use moss as sea-foam \
@@ -199,17 +205,21 @@ impl Gardener {
                         *THEMES.choose(&mut rng).unwrap()
                     }
                 } else {
-                    THEMES
-                        .iter()
-                        .find(|(name, _)| name.to_lowercase().contains(&choice.to_lowercase()))
-                        .copied()
-                        .unwrap_or_else(|| {
-                            log::warn!("theme '{choice}' not found; choosing randomly");
-                            *THEMES.choose(&mut rng).unwrap()
-                        })
+                    if choice.eq_ignore_ascii_case("classic") {
+                        *THEMES.choose(&mut rng).unwrap()
+                    } else {
+                        THEMES
+                            .iter()
+                            .find(|(name, _)| name.to_lowercase().contains(&choice.to_lowercase()))
+                            .copied()
+                            .unwrap_or_else(|| {
+                                log::warn!("theme '{choice}' not found; using Creative Freedom");
+                                THEMES[0]
+                            })
+                    }
                 }
             }
-            _ => *THEMES.choose(&mut rng).unwrap(),
+            _ => THEMES[0],
         };
 
         let (name, desc) = chosen_theme;
@@ -232,6 +242,10 @@ impl Gardener {
 
     pub fn theme_name(&self) -> &str {
         &self.theme_name
+    }
+
+    pub fn is_creative_freedom(&self) -> bool {
+        self.theme_name.eq_ignore_ascii_case("creative freedom")
     }
 
     pub fn is_tabula_rasa(&self) -> bool {
@@ -265,13 +279,60 @@ impl Gardener {
     }
 
     fn build_prompt(&self, state: &str, border_drawn: bool, action_num: usize, history: &str) -> (String, String) {
-        if self.is_tabula_rasa() {
+        if self.is_creative_freedom() {
+            self.build_creative_prompt(state, action_num, history)
+        } else if self.is_tabula_rasa() {
             self.build_tabula_prompt(state, action_num, history)
         } else if self.is_wild_zones() {
             self.build_wild_prompt(state, action_num, history)
         } else {
             self.build_classic_prompt(state, border_drawn, action_num, history)
         }
+    }
+
+    fn build_creative_prompt(&self, state: &str, action_num: usize, history: &str) -> (String, String) {
+        let max_x = self.width.saturating_sub(1);
+        let max_y = self.height.saturating_sub(1);
+        let completion_hint = if action_num >= 25 {
+            "\nYou have created many elements. Consider calling done soon if your composition feels complete."
+        } else {
+            ""
+        };
+        let actions_block = format!(
+            r#"Available actions (return ONE as raw JSON, no markdown, no extra text):
+{{"action": "place_glyph", "x": <0-{max_x}>, "y": <0-{max_y}>, "glyph": "<any single emoji like '🌲','⭐','🌊','🪐','⚡','🏔️','☁️' or 1-2 ASCII chars like '# ','/**','/\\','||','..','==','++'>"}}
+{{"action": "draw_line", "y": <0-{max_y}>, "x1": <0-{max_x}>, "x2": <0-{max_x}>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
+{{"action": "draw_ring", "cx": <0-{max_x}>, "cy": <0-{max_y}>, "radius": <2-12>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
+{{"action": "fill_box", "x1": <0-{max_x}>, "y1": <0-{max_y}>, "x2": <0-{max_x}>, "y2": <0-{max_y}>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
+{{"action": "clear_cell", "x": <0-{max_x}>, "y": <0-{max_y}>}}
+{{"action": "done"}}"#
+        );
+        let sys = format!(
+            "You are a free-form AI artist composing ASCII art on an open terminal canvas ({w} columns x {h} rows).\
+             \n\nYOUR MISSION:\n\
+             Create compelling, original ASCII art across the full canvas. You have complete freedom:\n\
+             - Any emoji, any ASCII characters, any composition\n\
+             - No borders, no garden rules, no structural constraints\n\
+             - Build landscapes, patterns, abstract art, scenes, or anything that inspires you\n\n\
+             SESSION THEME: \"{theme_name}\"\n\
+             {theme_desc}\n\n\
+             {actions_block}\n\n\
+             RULES:\n\
+             1. Full creative freedom. Place any emoji or 1-2 ASCII characters anywhere.\n\
+             2. Grid cells are 2 columns wide. For ASCII, provide exactly 1-2 chars per cell.\n\
+             3. Build your composition over 15-35 prompts, then call `done`.\n\
+             4. NEVER repeat the exact same action. Each must add something new.\n\
+             5. Absolutely NO profanity, threats, or abusive content.\n\
+             6. Return ONLY one raw JSON object. No markdown fences.{completion_hint}",
+            w = self.width, h = self.height,
+            theme_name = self.theme_name, theme_desc = self.theme_desc,
+            actions_block = actions_block, completion_hint = completion_hint,
+        );
+        let usr = format!(
+            "{history}Current canvas (action #{action_num}):\n{state}\nNext action?",
+            action_num = action_num,
+        );
+        (sys, usr)
     }
 
     fn build_tabula_prompt(&self, state: &str, action_num: usize, history: &str) -> (String, String) {
@@ -462,6 +523,42 @@ impl Gardener {
                 _ => Action::ClearCell {
                     x: rng.random_range(1..max_x),
                     y: rng.random_range(1..max_y),
+                },
+            });
+        }
+
+        if self.is_creative_freedom() {
+            let cf_max_x = self.width.saturating_sub(1).max(1);
+            let cf_max_y = self.height.saturating_sub(1).max(1);
+            let choice = rng.random_range(0..5);
+            return Ok(match choice {
+                0 => Action::PlaceGlyph {
+                    x: rng.random_range(0..cf_max_x),
+                    y: rng.random_range(0..cf_max_y),
+                    glyph: ["🌲", "⭐", "🌊", "🪐", "⚡", "🏔️", "☁️", "🔮"].choose(&mut rng).unwrap().to_string(),
+                },
+                1 => Action::DrawLine {
+                    y: rng.random_range(0..cf_max_y),
+                    x1: 0,
+                    x2: cf_max_x,
+                    glyph: ["# ", "== ", ".. ", "++ "].choose(&mut rng).unwrap().to_string(),
+                },
+                2 => Action::DrawRing {
+                    cx: cf_max_x / 2,
+                    cy: cf_max_y / 2,
+                    radius: rng.random_range(2..6),
+                    glyph: ["* ", "o "].choose(&mut rng).unwrap().to_string(),
+                },
+                3 => Action::FillBox {
+                    x1: rng.random_range(0..=cf_max_x/2),
+                    y1: rng.random_range(0..=cf_max_y/2),
+                    x2: rng.random_range(cf_max_x/2..=cf_max_x),
+                    y2: rng.random_range(cf_max_y/2..=cf_max_y),
+                    glyph: [". ", ", "].choose(&mut rng).unwrap().to_string(),
+                },
+                _ => Action::ClearCell {
+                    x: rng.random_range(0..cf_max_x),
+                    y: rng.random_range(0..cf_max_y),
                 },
             });
         }

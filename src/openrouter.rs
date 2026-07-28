@@ -95,14 +95,21 @@ impl LlmClient {
 
             let status = resp.status();
             if !status.is_success() {
+                let retry_after = resp
+                    .headers()
+                    .get("Retry-After")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .map(Duration::from_secs);
                 let err_body = resp.text().await.unwrap_or_default();
                 let retryable = status == reqwest::StatusCode::TOO_MANY_REQUESTS
                     || status.is_server_error()
                     || status == reqwest::StatusCode::BAD_REQUEST;
                 if retryable && attempt < MAX_RETRY_ATTEMPTS {
-                    log::warn!("LLM API returned status {status} (attempt {attempt}/{MAX_RETRY_ATTEMPTS}): {err_body}. Retrying in {backoff:?}...");
-                    tokio::time::sleep(backoff).await;
-                    backoff *= 2;
+                    let wait = retry_after.unwrap_or(backoff);
+                    log::warn!("LLM API returned status {status} (attempt {attempt}/{MAX_RETRY_ATTEMPTS}): {err_body}. Retrying in {wait:?}...");
+                    tokio::time::sleep(wait).await;
+                    backoff = (backoff * 2).min(Duration::from_secs(120));
                     continue;
                 }
                 return Err(anyhow::anyhow!("LLM API error (status {status}): {err_body}"));

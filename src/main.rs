@@ -35,9 +35,9 @@ const SESSION_DURATION: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "karesansui")]
-#[command(about = "A minimalist ASCII & emoji zen garden, mandala & fractal generator tended by a turtle and an LLM.")]
+#[command(about = "A creative terminal ASCII art generator, tended by a turtle and an LLM.")]
 pub struct CliArgs {
-    /// Choose a specific theme by name or index (1-19), or "random"
+    /// Choose a specific theme by name or index (1-21), or "random", or "classic"
     #[arg(short, long)]
     pub theme: Option<String>,
 
@@ -49,13 +49,9 @@ pub struct CliArgs {
     #[arg(long, default_value_t = 20)]
     pub height: usize,
 
-    /// Seconds between normal LLM prompts (default: 6)
-    #[arg(short, long, default_value_t = 6)]
+    /// Seconds between LLM prompts (default: 180 = 3 min)
+    #[arg(short, long, default_value_t = 180)]
     pub pace: u64,
-
-    /// Seconds to rest after every 10 prompts (default: 30)
-    #[arg(long, default_value_t = 30)]
-    pub rest: u64,
 
     /// Interactive menu mode to select themes and settings on startup
     #[arg(short, long, default_value_t = false)]
@@ -135,15 +131,6 @@ fn interactive_menu(args: &mut CliArgs) -> Result<()> {
         }
     }
 
-    line.clear();
-    print!("Enter rest (seconds after 10 moves) [default: {}]: ", args.rest);
-    std::io::Write::flush(&mut std::io::stdout())?;
-    if reader.read_line(&mut line).is_ok() && !line.trim().is_empty() {
-        if let Ok(r) = line.trim().parse::<u64>() {
-            args.rest = r;
-        }
-    }
-
     println!("\n✨ Settings saved! The turtle (`🐢`) is getting ready...\n");
     std::thread::sleep(Duration::from_secs(1));
     Ok(())
@@ -196,16 +183,6 @@ async fn main() -> Result<()> {
         Duration::from_secs(args.pace)
     };
 
-    let rest_duration = if let Ok(rest_str) = std::env::var("KARESANSUI_REST_SECS") {
-        if let Ok(r) = rest_str.parse::<u64>() {
-            Duration::from_secs(r)
-        } else {
-            Duration::from_secs(args.rest)
-        }
-    } else {
-        Duration::from_secs(args.rest)
-    };
-
     let shutdown = Arc::new(AtomicBool::new(false));
     {
         let shutdown_signal = shutdown.clone();
@@ -243,6 +220,7 @@ async fn main() -> Result<()> {
 
         let theme = gardener.theme_name().to_string();
         let border_name = garden.border_pattern.name;
+        let is_creative = gardener.is_creative_freedom();
         let is_tabula = gardener.is_tabula_rasa();
         let is_wild = gardener.is_wild_zones();
 
@@ -275,7 +253,7 @@ async fn main() -> Result<()> {
 
         let mut consecutive_errors = 0;
         let mut recent_actions: Vec<Action> = Vec::new();
-        let mut border_drawn = is_tabula || is_wild || is_resumed;
+        let mut border_drawn = is_creative || is_tabula || is_wild || is_resumed;
 
         if is_tabula {
             garden.turtle_glyph = "[*]";
@@ -285,7 +263,10 @@ async fn main() -> Result<()> {
 
         if !is_resumed {
             crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All), crossterm::cursor::MoveTo(0, 0))?;
-            if is_tabula {
+            if is_creative {
+                println!("🎨 Creative Freedom — Theme: \"{theme}\"\n");
+                println!("   🐢 The turtle is unleashed to create original ASCII art across the full canvas...\n");
+            } else if is_tabula {
                 println!("✨ Tabula Rasa — Theme: \"{theme}\"\n");
                 println!("   [*] The ASCII muse is waking up to sketch across the canvas...\n");
             } else if is_wild {
@@ -308,7 +289,9 @@ async fn main() -> Result<()> {
                 break;
             }
             let state = garden.render();
-            let header = if is_tabula {
+            let header = if is_creative {
+                format!("🎨 Creative Freedom — Theme: \"{theme}\"  [prompt #{prompt_count}]")
+            } else if is_tabula {
                 format!("✨ Tabula Rasa — Theme: \"{theme}\"  [prompt #{prompt_count}]")
             } else if is_wild {
                 format!("🌊 Wild Zones — Theme: \"{theme}\"  [prompt #{prompt_count}]")
@@ -336,7 +319,7 @@ async fn main() -> Result<()> {
                 }
             };
 
-            if matches!(action, Action::DrawBorder) && border_drawn && !is_wild {
+            if matches!(action, Action::DrawBorder) && border_drawn && !is_wild && !is_creative {
                 continue;
             }
 
@@ -345,7 +328,9 @@ async fn main() -> Result<()> {
             if recent_actions.len() > llm::RECENT_ACTIONS_LIMIT {
                 recent_actions.drain(0..recent_actions.len() - llm::RECENT_ACTIONS_LIMIT);
             }
-            let header = if is_tabula {
+            let header = if is_creative {
+                format!("🎨 Creative Freedom — Theme: \"{theme}\"  [prompt #{prompt_count} — 🐢 creating...]")
+            } else if is_tabula {
                 format!("✨ Tabula Rasa — Theme: \"{theme}\"  [prompt #{prompt_count} — [*] sketching...]")
             } else if is_wild {
                 format!("🌊 Wild Zones — Theme: \"{theme}\"  [prompt #{prompt_count} — 🐢 creating...]")
@@ -362,7 +347,9 @@ async fn main() -> Result<()> {
                 garden.turtle_glyph = if is_tabula { "[z]" } else { "💤" };
                 for remaining in (1..=20).rev() {
                     if shutdown.load(Ordering::SeqCst) { break; }
-                    let h = if is_tabula {
+                    let h = if is_creative {
+                        format!("🎨 Creative Freedom — \"{theme}\" — Complete! 💤 admiring ({remaining}s until reset)")
+                    } else if is_tabula {
                         format!("✨ Tabula Rasa — \"{theme}\" — Complete! [z] admiring ({remaining}s until reset)")
                     } else if is_wild {
                         format!("🌊 Wild Zones — \"{theme}\" — Complete! 💤 admiring ({remaining}s until reset)")
@@ -389,24 +376,13 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
 
-            let wait_dur = if prompt_count % 10 == 0 { rest_duration } else { pace_duration };
             garden.turtle_glyph = if is_tabula { "[z]" } else { "💤" };
-            for remaining in (1..=wait_dur.as_secs()).rev() {
+            for remaining in (1..=pace_duration.as_secs()).rev() {
                 if session_start.elapsed() >= SESSION_DURATION || shutdown.load(Ordering::SeqCst) {
                     break;
                 }
-                let status = if prompt_count % 10 == 0 {
-                    format!("[prompt #{prompt_count} — {} resting {}s rate-limit pause: {remaining}s remaining]", if is_tabula { "[z]" } else { "💤" }, rest_duration.as_secs())
-                } else {
-                    format!("[prompt #{prompt_count} — {} resting: {remaining}s until next move]", if is_tabula { "[z]" } else { "💤" })
-                };
-                let h = if is_tabula {
-                    format!("✨ Tabula Rasa — Theme: \"{theme}\"  {status}")
-                } else if is_wild {
-                    format!("🌊 Wild Zones — Theme: \"{theme}\"  {status}")
-                } else {
-                    format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  {status}")
-                };
+                let status = format!("[prompt #{prompt_count} — {} resting: {remaining}s until next move]", if is_tabula { "[z]" } else { "💤" });
+                let h = format!("Theme: \"{theme}\"  {status}");
                 garden.render_screen(&h, args.no_color)?;
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
