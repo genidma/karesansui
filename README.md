@@ -110,8 +110,8 @@ Two providers are supported out of the box:
 
 | Provider | Endpoint | Key prefix | Best for |
 |----------|----------|------------|----------|
+| **NVIDIA NIM** ⭐ | `https://integrate.api.nvidia.com/v1/chat/completions` | `nvapi-...` | Higher rate limits, faster inference (recommended) |
 | **OpenRouter** | `https://openrouter.ai/api/v1/chat/completions` | `sk-or-...` | Free tier models, broad selection |
-| **NVIDIA NIM** | `https://integrate.api.nvidia.com/v1/chat/completions` | `nvapi-...` | Higher rate limits, faster inference |
 
 Any OpenAI-compatible API can be used by setting `LLM_API_URL` to the desired endpoint.
 
@@ -126,14 +126,14 @@ Any OpenAI-compatible API can be used by setting `LLM_API_URL` to the desired en
    ```bash
    cp .env.example .env
    ```
-3. Configure `.env` with your provider of choice:
+3. Configure `.env` with your provider:
    ```bash
-   # For NVIDIA:
+   # NVIDIA NIM (recommended — higher rate limits, faster inference):
    LLM_API_KEY=nvapi-...
    LLM_API_URL=https://integrate.api.nvidia.com/v1/chat/completions
-   LLM_MODEL=nvidia/llama-3.1-nemotron-70b-instruct
+   LLM_MODEL=nvidia/nemotron-3-nano-30b-a3b
 
-   # For OpenRouter:
+   # OpenRouter (fallback — free tier, more limited rate limits):
    LLM_API_KEY=sk-or-...
    # LLM_API_URL defaults to OpenRouter
    LLM_MODEL=tencent/hy3:free
