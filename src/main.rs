@@ -59,6 +59,10 @@ pub struct CliArgs {
     /// Disable faint crossterm coloring and use plain text output
     #[arg(long, default_value_t = false)]
     pub no_color: bool,
+
+    /// Seconds to admire the completed artwork before starting the next piece (default: 20, 0 to admire forever until Ctrl+C)
+    #[arg(long, default_value_t = 20)]
+    pub admire: u64,
 }
 
 /// Present a clean interactive menu for picking theme and settings.
@@ -263,11 +267,11 @@ async fn main() -> Result<()> {
 
         // Admire the final piece
         garden.turtle_glyph = "💤";
-        for remaining in (1..=20).rev() {
+        let admire_secs = if args.admire == 0 { u64::MAX } else { args.admire };
+        for remaining in (1..=admire_secs).rev() {
             if shutdown.load(Ordering::SeqCst) { break 'session; }
-            let h = format!(
-                "{theme_label} — \"{theme}\" — Complete! 💤 admiring ({remaining}s until next piece)",
-            );
+            let suffix = if args.admire == 0 { "∞ until Ctrl+C" } else { &format!("{remaining}s until next piece") };
+            let h = format!("{theme_label} — \"{theme}\" — Complete! 💤 admiring ({suffix})",);
             garden.render_screen(&h, args.no_color)?;
             tokio::time::sleep(Duration::from_secs(1)).await;
         }

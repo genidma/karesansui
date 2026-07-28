@@ -59,8 +59,11 @@ cargo run -- -t classic
 # Run an offline simulation (dry run) with single-step verification:
 cargo run -- --dry-run --step --snapshot garden_dump.txt
 
-# Customize canvas size and animation speed:
-cargo run -- --width 54 --height 22 --pace 40 --no-color
+# Customize canvas size, animation speed, and admiration time:
+cargo run -- --width 54 --height 22 --pace 40 --admire 180 --no-color
+
+# Admire forever until Ctrl+C:
+cargo run -- --admire 0
 
 # View all available CLI flags:
 cargo run -- --help
@@ -77,6 +80,7 @@ cargo run -- --help
 | `--step` | `-s` | `false` | Single-step mode: press Enter between each action |
 | `--snapshot <PATH>` | | — | Save final canvas to file |
 | `--no-color` | | `false` | Disable crossterm coloring, plain text output |
+| `--admire <SECS>` | | `20` | Seconds to admire artwork before next piece (`0` = forever until Ctrl+C) |
 
 ## Themes
 
