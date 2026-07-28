@@ -557,6 +557,38 @@ async fn main() -> Result<()> {
                     }
                     break;
                 }
+                Action::PlaceMultiCellGlyph { anchor_x, anchor_y, glyphs } => {
+                    for (dx, dy, glyph) in &glyphs {
+                        let x = anchor_x.saturating_add(*dx);
+                        let y = anchor_y.saturating_add(*dy);
+                        garden.place_glyph(x, y, glyph);
+                    }
+                    garden.turtle_pos = Some((anchor_x, anchor_y));
+                    render_screen(&header, &garden, args.no_color)?;
+                    tokio::time::sleep(Duration::from_millis(60)).await;
+                }
+                Action::DrawFlowLine { points, glyph } => {
+                    for (x, y) in points {
+                        garden.place_glyph(x, y, &glyph);
+                        garden.turtle_pos = Some((x, y));
+                        render_screen(&header, &garden, args.no_color)?;
+                        tokio::time::sleep(Duration::from_millis(30)).await;
+                    }
+                }
+                Action::ApplyGlitchFilter { x, y, .. } => {
+                    let cell = garden.grid[y][x].clone();
+                    let corrupted = format!("?{}", cell.chars().next().unwrap_or(' '));
+                    garden.place_glyph(x, y, &corrupted);
+                    garden.turtle_pos = Some((x, y));
+                    render_screen(&header, &garden, args.no_color)?;
+                    tokio::time::sleep(Duration::from_millis(40)).await;
+                }
+                Action::PlaceBlendedGlyph { x, y, glyph, .. } => {
+                    garden.place_glyph(x, y, &glyph);
+                    garden.turtle_pos = Some((x, y));
+                    render_screen(&header, &garden, args.no_color)?;
+                    tokio::time::sleep(Duration::from_millis(40)).await;
+                }
             }
 
             if args.resume || args.state_file.is_some() {

@@ -104,7 +104,7 @@ impl AsciiTheme {
             AsciiTheme::Gridwright => 1,
         }
     }
-    
+
     pub fn allow_overlapping(&self) -> bool {
         match self {
             AsciiTheme::Classic => false,
@@ -117,7 +117,7 @@ impl AsciiTheme {
             AsciiTheme::Gridwright => false,
         }
     }
-    
+
     pub fn restrict_to_ascii_only(&self) -> bool {
         match self {
             AsciiTheme::Classic => true,
@@ -330,7 +330,6 @@ impl Garden {
     /// Set the ASCII theme for rendering
     pub fn set_ascii_theme(&mut self, theme: AsciiTheme) {
         self.ascii_theme = theme;
-        // Clear existing layers when theme changes
         self.glyph_layers.clear();
     }
 
@@ -339,15 +338,12 @@ impl Garden {
         if y >= self.height || x >= self.width {
             return;
         }
-        
         match self.ascii_theme {
             AsciiTheme::Classic | AsciiTheme::TabulaRasa | AsciiTheme::WildZones => {
-                // Original glyph placement
                 self.grid[y][x] = self.format_2col_glyph(glyph);
             }
             AsciiTheme::Gridwright => {
                 // Gridwright uses its own canvas, not Garden
-                // This should be handled by the caller
             }
             AsciiTheme::EnhancedTabulaRasa => {
                 self.place_ascii_enhanced(x, y, glyph);
@@ -356,14 +352,15 @@ impl Garden {
                 self.place_chaotic_glyph(x, y, glyph);
             }
             AsciiTheme::MatrixASCII => {
+                let content = self.format_2col_glyph(glyph);
                 let layer = LayeredGlyph {
-                    content: self.format_2col_glyph(glyph),
+                    content: content.clone(),
                     z_index: 0,
                     blend_mode: BlendMode::Replace,
                     opacity: 1.0,
                 };
                 self.glyph_layers.entry((x, y)).or_insert_with(Vec::new).push(layer);
-                self.grid[y][x] = layer.content;
+                self.grid[y][x] = content;
             }
             AsciiTheme::GlitchASCII => {
                 let corrupted = self.apply_glitch_filter(glyph);
@@ -372,7 +369,6 @@ impl Garden {
         }
     }
 
-    /// Enhanced ASCII placement for Enhanced Tabula Rasa
     fn place_ascii_enhanced(&mut self, x: usize, y: usize, glyph: &str) {
         let mut clean = String::new();
         for ch in glyph.chars() {
@@ -380,10 +376,8 @@ impl Garden {
                 clean.push(ch);
             }
         }
-        
         let max_width = self.ascii_theme.max_glyph_width();
         let display_width = clean.len().min(max_width);
-        
         let mut display = String::new();
         for i in 0..display_width {
             display.push(clean.chars().nth(i).unwrap_or_default());
@@ -391,11 +385,9 @@ impl Garden {
                 display.push(' ');
             }
         }
-        
         self.grid[y][x] = display;
     }
 
-    /// Chaotic ASCII placement with variable width
     fn place_chaotic_glyph(&mut self, x: usize, y: usize, glyph: &str) {
         let mut display = String::new();
         for ch in glyph.chars() {
@@ -409,14 +401,13 @@ impl Garden {
         self.grid[y][x] = display;
     }
 
-    /// Apply glitch effects to glyph
     fn apply_glitch_filter(&self, glyph: &str) -> String {
         let mut result = String::new();
         for ch in glyph.chars() {
             if ch.is_ascii() {
-                let rand: f32 = rand::random_range(0.0..1.0);
-                if rand < 0.1 {
-                    result.push('�');
+                let r: f32 = rand::random_range(0.0..1.0);
+                if r < 0.1 {
+                    result.push('?');
                 } else {
                     result.push(ch);
                 }
@@ -427,31 +418,6 @@ impl Garden {
         result
     }
 
-    /// Format glyph for standard themes (2-column)
-    fn format_2col_glyph(&self, glyph: &str) -> String {
-        let clean: Vec<char> = glyph
-            .chars()
-            .filter(|c| *c != '\n' && *c != '\r' && !c.is_control())
-            .collect();
-        if clean.is_empty() {
-            return "  ".to_string();
-        }
-        let first = clean[0];
-        if first.is_ascii() {
-            if clean.len() >= 2 && clean[1].is_ascii() {
-                let mut s = String::new();
-                s.push(first);
-                s.push(clean[1]);
-                s
-            } else {
-                format!("{}", first)
-            }
-        } else {
-            first.to_string()
-        }
-    }
-
-    /// Get composite glyph considering layered glyphs (for Matrix ASCII)
     pub fn get_composite_glyph(&self, x: usize, y: usize) -> String {
         if let Some(layers) = self.glyph_layers.get(&(x, y)) {
             if let Some(layer) = layers.last() {
@@ -459,25 +425,6 @@ impl Garden {
             }
         }
         self.grid[y][x].clone()
-    }
-
-    // Default implementations (kept for backward compatibility)
-    pub fn place_rock(&mut self, _: usize, _: usize, _: u8) {}
-    pub fn place_moss(&mut self, _: usize, _: usize) {}
-    pub fn place_flower(&mut self, _: usize, _: usize) {}
-    pub fn place_lantern(&mut self, _: usize, _: usize) {}
-    pub fn place_mandala(&mut self, _: usize, _: usize, _: u8) {}
-    pub fn place_ascii(&mut self, _: usize, _: usize, _: &str) {}
-    pub fn clear_cell(&mut self, x: usize, y: usize) {
-        if y < self.height && x < self.width {
-            self.grid[y][x] = EMPTY.to_string();
-        }
-    }
-    pub fn rake_line(&mut self, _: usize, _: usize, _: usize) {}
-    pub fn rake_ring(&mut self, _: usize, _: usize, _: usize) {}
-    pub fn place_gravel(&mut self, _: usize, _: usize, _: usize) {}
-    pub fn draw_border(&mut self) {}
-}
     }
 
     pub fn is_empty(&self, x: usize, y: usize) -> bool {
@@ -544,11 +491,9 @@ impl Garden {
         }
     }
 
-    /// Helper to compute grid coordinates around a circle circumference.
     pub fn ring_points(&self, cx: usize, cy: usize, radius: usize) -> Vec<(usize, usize)> {
         let mut points = Vec::new();
         let r = radius as f64;
-        // Step around 360 degrees
         for deg in (0..360).step_by(10) {
             let rad = (deg as f64).to_radians();
             let dx = (r * rad.cos()).round() as isize;
@@ -682,16 +627,8 @@ impl Garden {
                 format!("{} ", first)
             }
         } else {
-            // Non-ASCII emoji or wide symbol naturally occupies 2 terminal columns.
             first.to_string()
         }
-    }
-
-    pub fn place_glyph(&mut self, x: usize, y: usize, glyph: &str) {
-        if y >= self.height || x >= self.width {
-            return;
-        }
-        self.grid[y][x] = self.format_2col_glyph(glyph);
     }
 
     #[allow(dead_code)]
@@ -835,6 +772,8 @@ impl Garden {
             turtle_glyph,
             border_pattern,
             border_pattern_index: state.border_pattern_index,
+            ascii_theme: AsciiTheme::Classic,
+            glyph_layers: HashMap::new(),
         };
         Ok((garden, state.prompt_count, state.theme_name))
     }
