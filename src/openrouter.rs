@@ -3,21 +3,21 @@ use serde::Deserialize;
 use serde_json::json;
 use std::time::Duration;
 
-const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
+const DEFAULT_API_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_RETRY_ATTEMPTS: u32 = 4;
 
 #[derive(Debug, Deserialize)]
-struct ORResponse {
+struct ChatResponse {
     choices: Vec<Choice>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Choice {
-    message: ChatMessageOut,
+    message: ChatMessage,
 }
 
 #[derive(Debug, Deserialize)]
-struct ChatMessageOut {
+struct ChatMessage {
     content: String,
 }
 
@@ -25,15 +25,25 @@ pub struct LlmClient {
     client: reqwest::Client,
     api_key: String,
     pub model: String,
+    pub api_url: String,
 }
 
 impl LlmClient {
     pub fn new(api_key: String, model: String) -> Self {
+        let api_url = std::env::var("LLM_API_URL")
+            .or_else(|_| std::env::var("OPENROUTER_URL"))
+            .unwrap_or_else(|_| DEFAULT_API_URL.to_string());
+        log::info!("LLM API endpoint: {api_url}");
         Self {
             client: reqwest::Client::new(),
             api_key,
             model,
+            api_url,
         }
+    }
+
+    fn is_openrouter(&self) -> bool {
+        self.api_url.contains("openrouter.ai")
     }
 
     pub async fn call_raw(
@@ -55,27 +65,31 @@ impl LlmClient {
         let mut backoff = Duration::from_millis(1000);
 
         for attempt in 1..=MAX_RETRY_ATTEMPTS {
-            let resp = self
+            let mut req = self
                 .client
-                .post(OPENROUTER_URL)
+                .post(&self.api_url)
                 .header("Authorization", format!("Bearer {}", self.api_key))
                 .header("Content-Type", "application/json")
-                .header("HTTP-Referer", "https://github.com/karesansui")
-                .header("X-Title", title)
-                .json(&body)
-                .send()
-                .await;
+                .json(&body);
+
+            if self.is_openrouter() {
+                req = req
+                    .header("HTTP-Referer", "https://github.com/karesansui")
+                    .header("X-Title", title);
+            }
+
+            let resp = req.send().await;
 
             let resp = match resp {
                 Ok(r) => r,
                 Err(e) => {
                     if attempt < MAX_RETRY_ATTEMPTS {
-                        log::warn!("Network error calling OpenRouter (attempt {attempt}/{MAX_RETRY_ATTEMPTS}): {e}. Retrying in {backoff:?}...");
+                        log::warn!("Network error calling LLM API (attempt {attempt}/{MAX_RETRY_ATTEMPTS}): {e}. Retrying in {backoff:?}...");
                         tokio::time::sleep(backoff).await;
                         backoff *= 2;
                         continue;
                     }
-                    return Err(anyhow::anyhow!("OpenRouter network error after {MAX_RETRY_ATTEMPTS} attempts: {e}"));
+                    return Err(anyhow::anyhow!("LLM API network error after {MAX_RETRY_ATTEMPTS} attempts: {e}"));
                 }
             };
 
@@ -86,22 +100,22 @@ impl LlmClient {
                     || status.is_server_error()
                     || status == reqwest::StatusCode::BAD_REQUEST;
                 if retryable && attempt < MAX_RETRY_ATTEMPTS {
-                    log::warn!("OpenRouter API returned status {status} (attempt {attempt}/{MAX_RETRY_ATTEMPTS}): {err_body}. Retrying in {backoff:?}...");
+                    log::warn!("LLM API returned status {status} (attempt {attempt}/{MAX_RETRY_ATTEMPTS}): {err_body}. Retrying in {backoff:?}...");
                     tokio::time::sleep(backoff).await;
                     backoff *= 2;
                     continue;
                 }
-                return Err(anyhow::anyhow!("OpenRouter API error (status {status}): {err_body}"));
+                return Err(anyhow::anyhow!("LLM API error (status {status}): {err_body}"));
             }
 
-            let or_resp: ORResponse = resp.json().await.context("Failed to parse OpenRouter JSON response")?;
+            let chat_resp: ChatResponse = resp.json().await.context("Failed to parse LLM JSON response")?;
 
-            let content = or_resp
+            let content = chat_resp
                 .choices
                 .into_iter()
                 .next()
                 .map(|c| c.message.content)
-                .ok_or_else(|| anyhow::anyhow!("No choices returned from OpenRouter"))?;
+                .ok_or_else(|| anyhow::anyhow!("No choices returned from LLM API"))?;
 
             return Ok(strip_markdown_fence(&content));
         }

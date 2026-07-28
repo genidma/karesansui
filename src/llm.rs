@@ -169,12 +169,17 @@ impl Gardener {
         let api_key = if dry_run {
             String::new()
         } else {
-            std::env::var("OPENROUTER_API_KEY")
-                .map_err(|_| anyhow::anyhow!("OPENROUTER_API_KEY not set (add it to .env)"))?
+            std::env::var("LLM_API_KEY")
+                .or_else(|_| std::env::var("OPENROUTER_API_KEY"))
+                .map_err(|_| anyhow::anyhow!("LLM_API_KEY or OPENROUTER_API_KEY not set (add it to .env)"))?
         };
 
         let requested = model.into();
-        let model = if FREE_MODELS.contains(&requested.as_str()) {
+        let using_openrouter = std::env::var("LLM_API_URL")
+            .or_else(|_| std::env::var("OPENROUTER_URL"))
+            .map(|u| u.contains("openrouter.ai"))
+            .unwrap_or(true);
+        let model = if !using_openrouter || FREE_MODELS.contains(&requested.as_str()) {
             requested
         } else {
             log::warn!(

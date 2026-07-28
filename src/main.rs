@@ -171,14 +171,16 @@ async fn main() -> Result<()> {
     let _clean_exit = CleanExit;
     crossterm::execute!(std::io::stdout(), crossterm::cursor::Hide)?;
 
-    let model = std::env::var("OPENROUTER_MODEL")
+    let model = std::env::var("LLM_MODEL")
+        .or_else(|_| std::env::var("OPENROUTER_MODEL"))
         .unwrap_or_else(|_| "tencent/hy3:free".to_string());
 
     let gridwright_api_key = if args.dry_run {
         String::new()
     } else {
-        std::env::var("OPENROUTER_API_KEY")
-            .map_err(|_| anyhow::anyhow!("OPENROUTER_API_KEY not set (add it to .env)"))?
+        std::env::var("LLM_API_KEY")
+            .or_else(|_| std::env::var("OPENROUTER_API_KEY"))
+            .map_err(|_| anyhow::anyhow!("LLM_API_KEY or OPENROUTER_API_KEY not set (add it to .env)"))?
     };
 
     let width = args.width;
