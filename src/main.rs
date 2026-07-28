@@ -20,16 +20,6 @@ use llm::{Gardener, THEMES};
 use pixel_art::GridwrightConfig;
 use tokio::signal;
 
-fn restore_terminal() {
-    use crossterm::{cursor, terminal};
-    let _ = crossterm::execute!(
-        std::io::stdout(),
-        cursor::Show,
-        terminal::Clear(terminal::ClearType::All),
-        cursor::MoveTo(0, 0),
-    );
-}
-
 #[derive(Parser, Debug, Clone)]
 #[command(name = "karesansui")]
 #[command(about = "A creative terminal ASCII art generator, tended by a turtle and an LLM.")]
@@ -206,98 +196,74 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Initial display
-    crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All), crossterm::cursor::MoveTo(0, 0))?;
-    if is_creative {
-        println!("🎨 Creative Freedom — Theme: \"{theme}\"\n");
-        println!("   🐢 The turtle is composing a complete ASCII art masterpiece...\n");
-    } else if is_tabula {
-        println!("✨ Tabula Rasa — Theme: \"{theme}\"\n");
-        println!("   [*] The ASCII muse is composing a pure ASCII artwork...\n");
-    } else if is_wild {
-        println!("🌊 Wild Zones — Theme: \"{theme}\"\n");
-        println!("   🐢 The turtle is composing a wild creation...\n");
-    } else {
-        println!("🌿 karesansui — Theme: \"{theme}\"\n");
-        println!("   🐢 The turtle is composing a zen garden...\n");
-    }
+    // Continuous loop: generate → admire → reset → regenerate
+    'session: loop {
+        // Display theme intro
+        crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All), crossterm::cursor::MoveTo(0, 0))?;
+        let theme_label = if is_creative { "🎨 Creative Freedom" } else if is_tabula { "✨ Tabula Rasa" } else if is_wild { "🌊 Wild Zones" } else { "🌿 karesansui" };
+        println!("{theme_label} — Theme: \"{theme}\"\n");
+        let desc = if is_creative { "The turtle is composing a complete ASCII art masterpiece..." } else if is_tabula { "[*] The ASCII muse is composing a pure ASCII artwork..." } else if is_wild { "The turtle is composing a wild creation..." } else { "The turtle is composing a zen garden..." };
+        println!("   🐢 {desc}\n");
 
-    // Wait for the LLM to compose the full artwork
-    println!("⏳ Asking the LLM to compose a complete piece (this may take 1-3 minutes)...");
-    let state = garden.render();
-    let start = Instant::now();
-    let actions = gardener.compose_artwork(&state).await?;
-    let elapsed = start.elapsed();
-    log::info!("LLM composed {} actions in {:.1}s", actions.len(), elapsed.as_secs_f64());
+        // Wait for the LLM to compose the full artwork — keep trying until success
+        let actions = loop {
+            if shutdown.load(Ordering::SeqCst) { break 'session; }
+            println!("⏳ Asking the LLM to compose a complete piece (may take 1-3 minutes)...");
+            let state = garden.render();
+            let start = Instant::now();
+            match gardener.compose_artwork(&state).await {
+                Ok(actions) if !actions.is_empty() => {
+                    log::info!("LLM composed {} actions in {:.1}s", actions.len(), start.elapsed().as_secs_f64());
+                    break actions;
+                }
+                Ok(_) => log::warn!("LLM returned empty action list. Retrying..."),
+                Err(e) => log::warn!("LLM composition failed: {e}. Retrying..."),
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        };
 
-    if shutdown.load(Ordering::SeqCst) {
-        restore_terminal();
-        println!("\nInterrupted during composition.");
-        return Ok(());
-    }
+        // Execute all actions in sequence
+        let action_count = actions.len();
+        for (i, action) in actions.iter().enumerate() {
+            if shutdown.load(Ordering::SeqCst) { break 'session; }
+            if matches!(action, Action::Done) { break; }
 
-    if actions.is_empty() {
-        println!("⚠️  LLM returned no actions. Nothing to do.");
-        return Ok(());
-    }
+            let header = format!(
+                "{theme_label} — \"{theme}\"  [action {}/{} — 🐢 creating...]",
+                i + 1, action_count
+            );
 
-    // Execute all actions in sequence
-    let action_count = actions.len();
-    for (i, action) in actions.iter().enumerate() {
-        if shutdown.load(Ordering::SeqCst) {
-            break;
+            if args.step {
+                garden.render_screen(&header, args.no_color)?;
+                log::info!("Action {}/{action_count}: {action:?}. Press Enter for next action...", i + 1);
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line).ok();
+            }
+
+            garden.execute_action(action, &header, args.no_color).await?;
+            tokio::time::sleep(anim_delay).await;
         }
 
-        if matches!(action, Action::Done) {
-            break;
+        if let Some(ref snapshot_path) = args.snapshot {
+            let _ = std::fs::write(snapshot_path, garden.render_colored(args.no_color));
         }
 
-        let header = format!(
-            "{} — \"{theme}\"  [action {}/{} — 🐢 creating...]",
-            if is_creative { "🎨 Creative Freedom" }
-            else if is_tabula { "✨ Tabula Rasa" }
-            else if is_wild { "🌊 Wild Zones" }
-            else { "🌿 karesansui" },
-            i + 1, action_count
-        );
-
-        if args.step {
-            garden.render_screen(&header, args.no_color)?;
-            log::info!("Action {}/{action_count}: {action:?}. Press Enter for next action...", i + 1);
-            let mut line = String::new();
-            std::io::stdin().read_line(&mut line).ok();
+        // Admire the final piece
+        garden.turtle_glyph = "💤";
+        for remaining in (1..=20).rev() {
+            if shutdown.load(Ordering::SeqCst) { break 'session; }
+            let h = format!(
+                "{theme_label} — \"{theme}\" — Complete! 💤 admiring ({remaining}s until next piece)",
+            );
+            garden.render_screen(&h, args.no_color)?;
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
 
-        garden.execute_action(action, &header, args.no_color).await?;
-        tokio::time::sleep(anim_delay).await;
-    }
-
-    if let Some(ref snapshot_path) = args.snapshot {
-        let _ = std::fs::write(snapshot_path, garden.render_colored(args.no_color));
-    }
-
-    // Admire the final piece
-    garden.turtle_glyph = "💤";
-    for remaining in (1..=15).rev() {
-        if shutdown.load(Ordering::SeqCst) { break; }
-        let h = format!(
-            "{} — \"{theme}\" — Complete! 💤 admiring ({remaining}s)",
-            if is_creative { "🎨 Creative Freedom" }
-            else if is_tabula { "✨ Tabula Rasa" }
-            else if is_wild { "🌊 Wild Zones" }
-            else { "🌿 karesansui" },
-        );
-        garden.render_screen(&h, args.no_color)?;
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        // Reset canvas for next piece
+        garden.reset();
     }
 
     crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All), crossterm::cursor::MoveTo(0, 0))?;
-    if is_tabula {
-        println!("✨ Tabula Rasa — \"{theme}\" — Complete! [*]");
-    } else {
-        println!("{} — \"{theme}\" — Complete! 🐢", if is_creative { "🎨 Creative Freedom" } else if is_wild { "🌊 Wild Zones" } else { "🌿 karesansui" });
-    }
-    println!("\nFinal canvas:\n{}", garden.render_colored(args.no_color));
-
+    println!("🌿 karesansui — Interrupted. See you next time!");
     Ok(())
 }

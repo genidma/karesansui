@@ -683,6 +683,16 @@ impl Garden {
         Ok(())
     }
 
+    /// Reset the garden for a new piece: clear grid, reset turtle, pick new border pattern.
+    pub fn reset(&mut self) {
+        self.grid = vec![vec![EMPTY.to_string(); self.width]; self.height];
+        self.turtle_pos = Some((1, 1));
+        self.turtle_glyph = "🐢";
+        use rand::Rng;
+        self.border_pattern = BORDER_PATTERNS[rand::rng().random_range(0..BORDER_PATTERNS.len())].clone();
+        self.glyph_layers.clear();
+    }
+
     /// Animate the turtle walking step-by-step to (dest_x, dest_y).
     pub async fn animate_walk(&mut self, dest_x: usize, dest_y: usize, header: &str, no_color: bool) -> Result<()> {
         let (mut tx, mut ty) = self.turtle_pos.unwrap_or((1, 1));

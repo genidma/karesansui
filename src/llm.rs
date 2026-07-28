@@ -151,17 +151,59 @@ fn strip_markdown_fence(s: &str) -> String {
     }
 }
 
-fn parse_action_batch(content: &str) -> Result<Vec<Action>> {
-    let cleaned = strip_markdown_fence(content);
-    if cleaned.starts_with('[') {
-        let actions: Vec<Action> = serde_json::from_str(&cleaned)
-            .map_err(|e| anyhow::anyhow!("failed to parse action array '{cleaned}': {e}"))?;
-        Ok(actions)
-    } else {
-        let action: Action = serde_json::from_str(&cleaned)
-            .map_err(|e| anyhow::anyhow!("failed to parse single action '{cleaned}': {e}"))?;
-        Ok(vec![action])
+fn repair_json(s: &str) -> String {
+    // Fix common LLM mistake: `"x":40"` → `"x":40` (stray quote after number)
+    let bytes = s.as_bytes();
+    let mut result = Vec::with_capacity(bytes.len());
+    let len = bytes.len();
+    let mut i = 0;
+    while i < len {
+        if bytes[i] == b'"' && i + 3 < len {
+            // Check if preceding chars end with `:DIGITS` (no opening quote)
+            let mut j = i;
+            while j > 0 && (bytes[j - 1] as char).is_ascii_digit() {
+                j -= 1;
+            }
+            if j > 0 && bytes[j - 1] == b':' {
+                let mut k = j;
+                while k < i && (bytes[k] as char).is_ascii_digit() {
+                    k += 1;
+                }
+                if k == i {
+                    // This `"` is a stray quote after a number value — skip it
+                    i += 1;
+                    continue;
+                }
+            }
+        }
+        result.push(bytes[i]);
+        i += 1;
     }
+    String::from_utf8(result).unwrap_or_else(|_| s.to_string())
+}
+
+fn parse_action_batch(content: &str) -> Result<Vec<Action>> {
+    for _ in 0..3 {
+        let cleaned = strip_markdown_fence(content);
+        if cleaned.starts_with('[') {
+            if let Ok(actions) = serde_json::from_str::<Vec<Action>>(&cleaned) {
+                return Ok(actions);
+            }
+        } else if let Ok(action) = serde_json::from_str::<Action>(&cleaned) {
+            return Ok(vec![action]);
+        }
+        // Repair common LLM JSON errors and retry
+        let repaired = repair_json(content);
+        if repaired != content {
+            if repaired.starts_with('[') {
+                if let Ok(actions) = serde_json::from_str::<Vec<Action>>(&repaired) {
+                    return Ok(actions);
+                }
+            }
+        }
+        break;
+    }
+    Err(anyhow::anyhow!("failed to parse LLM response as action array or single action: {content}"))
 }
 
 impl Gardener {
@@ -257,17 +299,38 @@ impl Gardener {
     }
 
     /// Send a single comprehensive prompt to the LLM asking for a complete artwork.
-    /// Returns all actions to execute in sequence.
+    /// Returns all actions to execute in sequence. Retries with stricter prompts on parse failure.
     pub async fn compose_artwork(&self, state: &str) -> Result<Vec<Action>> {
-        let (system, user) = self.build_composition_prompt(state);
-
         if self.dry_run {
             return self.simulate_composition();
         }
 
         let client = self.client.as_ref().unwrap();
-        let content = client.call_raw(&system, &user, 1.0, "karesansui").await?;
-        parse_action_batch(&content)
+        let (sys_base, usr) = self.build_composition_prompt(state);
+        let mut last_err = String::new();
+
+        for attempt in 1..=3 {
+            let system = if attempt == 1 {
+                sys_base.clone()
+            } else {
+                format!(
+                    "{sys_base}\n\nIMPORTANT: Your previous response had a JSON error: {last_err}\n\
+                     Return ONLY valid raw JSON. No markdown fences. \
+                     Make sure numbers are NOT quoted: use `\"x\": 40` NOT `\"x\": \"40\"`."
+                )
+            };
+            let content = client.call_raw(&system, &usr, 1.0, "karesansui").await?;
+            match parse_action_batch(&content) {
+                Ok(actions) => return Ok(actions),
+                Err(e) => {
+                    last_err = format!("{e}");
+                    log::warn!("LLM JSON parse failed (attempt {attempt}/3): {e}. Retrying...");
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            }
+        }
+
+        Err(anyhow::anyhow!("LLM failed to produce valid JSON after 3 attempts. Last error: {last_err}"))
     }
 
     fn build_composition_prompt(&self, state: &str) -> (String, String) {
