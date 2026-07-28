@@ -87,3 +87,22 @@
 | | - Added Retry-After header parsing for 429 rate-limit responses |
 | | - Changed default mode to Creative Freedom (unlimited ASCII art, no constraints) |
 | | - Changed default pacing to 180s for NVIDIA NIM rate-limit compatibility |
+
+---
+
+## opencode/big-pickle — Third Session (One-Shot Architecture)
+
+| | |
+|---|---|
+| **Source** | opencode/big-pickle (via opencode on claude.ai) |
+| **Date** | 2026-07-28 |
+| **Changes** | Fundamental architecture change: replaced incremental "one action per LLM call" with one-shot composition: |
+| | - `compose_artwork()` replaces `next_action()` — LLM returns a complete JSON array of 20-40 actions in a single response |
+| | - Removed pacing/rest/session loop from `main.rs` — no more 180s waits between moves |
+| | - LLM takes 1-3 minutes to compose the full piece, then turtle animates all actions immediately |
+| | - Removed `--resume`, `--state-file`, `--rest` CLI flags (no longer applicable) |
+| | - `--pace` now controls ms between animation steps (default 80ms) instead of seconds between prompts |
+| | - Removed `GardenState`, `save_to_file`, `load_from_file`, `border_pattern_index` dead code |
+| | - All prompts rewritten for one-shot batch mode (array of actions, not single action) |
+| | - Added `parse_action_batch()` and `strip_markdown_fence()` to `llm.rs` for array deserialization |
+| | - Dry-run simulation returns full batches of actions matching each theme |

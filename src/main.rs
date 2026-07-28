@@ -30,9 +30,6 @@ fn restore_terminal() {
     );
 }
 
-/// Session duration: 30 minutes per garden before automatic reset.
-const SESSION_DURATION: Duration = Duration::from_secs(30 * 60);
-
 #[derive(Parser, Debug, Clone)]
 #[command(name = "karesansui")]
 #[command(about = "A creative terminal ASCII art generator, tended by a turtle and an LLM.")]
@@ -49,31 +46,23 @@ pub struct CliArgs {
     #[arg(long, default_value_t = 20)]
     pub height: usize,
 
-    /// Seconds between LLM prompts (default: 180 = 3 min)
-    #[arg(short, long, default_value_t = 180)]
+    /// Milliseconds between each action animation step (default: 80)
+    #[arg(short, long, default_value_t = 80)]
     pub pace: u64,
 
     /// Interactive menu mode to select themes and settings on startup
     #[arg(short, long, default_value_t = false)]
     pub interactive: bool,
 
-    /// Resume garden from saved state file across sessions
-    #[arg(short, long, default_value_t = false)]
-    pub resume: bool,
-
-    /// Path to JSON state file for saving or resuming state
-    #[arg(long)]
-    pub state_file: Option<String>,
-
-    /// Offline simulation without making OpenRouter API calls
+    /// Offline simulation without making LLM API calls
     #[arg(short, long, default_value_t = false)]
     pub dry_run: bool,
 
-    /// Single-step debug mode: run one prompt and wait for Enter between actions
+    /// Single-step mode: press Enter between each action
     #[arg(short, long, default_value_t = false)]
     pub step: bool,
 
-    /// Dump garden state/text to file on completion or step
+    /// Dump final garden state to file on completion
     #[arg(long)]
     pub snapshot: Option<String>,
 
@@ -86,23 +75,21 @@ pub struct CliArgs {
 fn interactive_menu(args: &mut CliArgs) -> Result<()> {
     println!("\x1b[2J\x1b[H");
     println!("🎋----------------------------------------------------------------------🎋");
-    println!("   karesansui (枯山水) — Minimalist Zen Garden, Mandala & Fractal CLI");
+    println!("   karesansui (枯山水) — ASCII Art & Zen Garden CLI");
     println!("🎋----------------------------------------------------------------------🎋\n");
     println!("Choose your garden theme:");
-    
+
     let mid = (THEMES.len() + 1) / 2;
     for i in 0..mid {
         let left_num = i + 1;
         let left_name = THEMES[i].0;
-        let left_tag = if left_num >= 13 { " (✨ NEW)" } else { "" };
-        let left_str = format!("[{left_num}] {left_name}{left_tag}");
+        let left_str = format!("[{left_num}] {left_name}");
 
         if i + mid < THEMES.len() {
             let right_num = i + mid + 1;
             let right_name = THEMES[i + mid].0;
-            let right_tag = if right_num >= 13 { " (✨ NEW)" } else { "" };
-            let right_str = format!("[{right_num}] {right_name}{right_tag}");
-            println!("  {left_str:<36} {right_str}");
+            let right_str = format!("[{right_num}] {right_name}");
+            println!("  {left_str:<38} {right_str}");
         } else {
             println!("  {left_str}");
         }
@@ -123,7 +110,7 @@ fn interactive_menu(args: &mut CliArgs) -> Result<()> {
     }
 
     line.clear();
-    print!("Enter pace (seconds between moves) [default: {}]: ", args.pace);
+    print!("Enter animation speed in ms (lower = faster) [default: {}]: ", args.pace);
     std::io::Write::flush(&mut std::io::stdout())?;
     if reader.read_line(&mut line).is_ok() && !line.trim().is_empty() {
         if let Ok(p) = line.trim().parse::<u64>() {
@@ -173,15 +160,7 @@ async fn main() -> Result<()> {
     let width = args.width;
     let height = args.height;
 
-    let pace_duration = if let Ok(ms_str) = std::env::var("KARESANSUI_TICK_MS") {
-        if let Ok(ms) = ms_str.parse::<u64>() {
-            Duration::from_millis(ms)
-        } else {
-            Duration::from_secs(args.pace)
-        }
-    } else {
-        Duration::from_secs(args.pace)
-    };
+    let anim_delay = Duration::from_millis(args.pace);
 
     let shutdown = Arc::new(AtomicBool::new(false));
     {
@@ -192,206 +171,133 @@ async fn main() -> Result<()> {
         });
     }
 
-    loop {
-        let session_start = Instant::now();
-        let (mut garden, mut prompt_count, theme_name, is_resumed) = if args.resume {
-            let state_path = args.state_file.as_deref().unwrap_or("karesansui_state.json");
-            match Garden::load_from_file(state_path) {
-                Ok((g, p, t)) => {
-                    log::info!("Resumed garden state from {state_path} (theme: {t}, prompt #{p})");
-                    (g, p, t, true)
-                }
-                Err(e) => {
-                    log::warn!("Could not load resume state from {state_path}: {e}. Creating new garden.");
-                    let g = Garden::new(width, height);
-                    (g, 0, String::new(), false)
-                }
-            }
+    let mut garden = Garden::new(width, height);
+    let gardener = Gardener::new(&model, width, height, args.theme.as_deref(), args.dry_run)?;
+
+    let theme = gardener.theme_name().to_string();
+    let is_creative = gardener.is_creative_freedom();
+    let is_tabula = gardener.is_tabula_rasa();
+    let is_wild = gardener.is_wild_zones();
+
+    if theme.contains("Gridwright") {
+        let gw_w = if width != 48 || height != 20 { width } else { 16 };
+        let gw_h = if width != 48 || height != 20 { height } else { 16 };
+        let config = GridwrightConfig::new(gw_w, gw_h)
+            .with_subject("A bold, balanced pixel portrait with chunky blocks and strong negative space")
+            .with_palette("gridwright_spec")
+            .with_composition("Balanced, chunky blocks, hard edges, visible pixels, strong negative space")
+            .with_max_actions(20);
+        let runner = GridwrightRunner::new(gridwright_api_key, model, config, args.dry_run)
+            .with_pace(Duration::from_secs(1))
+            .with_step(args.step)
+            .with_no_color(args.no_color)
+            .with_snapshot_path(args.snapshot.clone());
+        let canvas = runner.run().await?;
+        let rendered = if args.no_color {
+            canvas.render()
         } else {
-            let g = Garden::new(width, height);
-            (g, 0, String::new(), false)
+            canvas.render_with_colors()
         };
-
-        let gardener = if is_resumed {
-            Gardener::new(&model, garden.width, garden.height, Some(&theme_name), args.dry_run)?
-        } else {
-            Gardener::new(&model, width, height, args.theme.as_deref(), args.dry_run)?
-        };
-
-        let theme = gardener.theme_name().to_string();
-        let border_name = garden.border_pattern.name;
-        let is_creative = gardener.is_creative_freedom();
-        let is_tabula = gardener.is_tabula_rasa();
-        let is_wild = gardener.is_wild_zones();
-
-        if theme.contains("Gridwright") {
-            let gw_w = if width != 48 || height != 20 { width } else { 16 };
-            let gw_h = if width != 48 || height != 20 { height } else { 16 };
-            let config = GridwrightConfig::new(gw_w, gw_h)
-                .with_subject("A bold, balanced pixel portrait with chunky blocks and strong negative space")
-                .with_palette("gridwright_spec")
-                .with_composition("Balanced, chunky blocks, hard edges, visible pixels, strong negative space")
-                .with_max_actions(20);
-            let runner = GridwrightRunner::new(gridwright_api_key.clone(), model.clone(), config, args.dry_run)
-                .with_pace(pace_duration)
-                .with_step(args.step)
-                .with_no_color(args.no_color)
-                .with_snapshot_path(args.snapshot.clone());
-            let canvas = runner.run().await?;
-            let rendered = if args.no_color {
-                canvas.render()
-            } else {
-                canvas.render_with_colors()
-            };
-            if let Some(snapshot_path) = args.snapshot.as_deref() {
-                std::fs::write(snapshot_path, &rendered)?;
-            }
-            println!("🎨 Gridwright — runtime LLM pixel art\n");
-            println!("{rendered}");
-            return Ok(());
+        if let Some(snapshot_path) = args.snapshot.as_deref() {
+            std::fs::write(snapshot_path, &rendered)?;
         }
-
-        let mut consecutive_errors = 0;
-        let mut recent_actions: Vec<Action> = Vec::new();
-        let mut border_drawn = is_creative || is_tabula || is_wild || is_resumed;
-
-        if is_tabula {
-            garden.turtle_glyph = "[*]";
-        } else {
-            garden.turtle_glyph = "🐢";
-        }
-
-        if !is_resumed {
-            crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All), crossterm::cursor::MoveTo(0, 0))?;
-            if is_creative {
-                println!("🎨 Creative Freedom — Theme: \"{theme}\"\n");
-                println!("   🐢 The turtle is unleashed to create original ASCII art across the full canvas...\n");
-            } else if is_tabula {
-                println!("✨ Tabula Rasa — Theme: \"{theme}\"\n");
-                println!("   [*] The ASCII muse is waking up to sketch across the canvas...\n");
-            } else if is_wild {
-                println!("🌊 Wild Zones — Theme: \"{theme}\"\n");
-                println!("   🐢 The turtle enters the unbound zone of absolute freedom and serenity...\n");
-            } else {
-                println!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"\n");
-                println!("   🐢 The turtle is waking up to tend the garden...\n");
-            }
-            tokio::time::sleep(Duration::from_secs(2)).await;
-        }
-        if shutdown.load(Ordering::SeqCst) {
-            restore_terminal();
-            println!("🌿 karesansui — Interrupted. See you next time!");
-            return Ok(());
-        }
-
-        while session_start.elapsed() < SESSION_DURATION {
-            if shutdown.load(Ordering::SeqCst) {
-                break;
-            }
-            let state = garden.render();
-            let header = if is_creative {
-                format!("🎨 Creative Freedom — Theme: \"{theme}\"  [prompt #{prompt_count}]")
-            } else if is_tabula {
-                format!("✨ Tabula Rasa — Theme: \"{theme}\"  [prompt #{prompt_count}]")
-            } else if is_wild {
-                format!("🌊 Wild Zones — Theme: \"{theme}\"  [prompt #{prompt_count}]")
-            } else {
-                format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  [prompt #{prompt_count}]")
-            };
-            garden.render_screen(&header, args.no_color)?;
-
-            let action = match gardener
-                .next_action(&state, border_drawn, prompt_count, &recent_actions)
-                .await
-            {
-                Ok(a) => {
-                    consecutive_errors = 0;
-                    a
-                }
-                Err(e) => {
-                    consecutive_errors += 1;
-                    if consecutive_errors >= 3 {
-                        log::error!("Gardener failed consistently: {e}");
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_secs(3)).await;
-                    continue;
-                }
-            };
-
-            if matches!(action, Action::DrawBorder) && border_drawn && !is_wild && !is_creative {
-                continue;
-            }
-
-            prompt_count += 1;
-            recent_actions.push(action.clone());
-            if recent_actions.len() > llm::RECENT_ACTIONS_LIMIT {
-                recent_actions.drain(0..recent_actions.len() - llm::RECENT_ACTIONS_LIMIT);
-            }
-            let header = if is_creative {
-                format!("🎨 Creative Freedom — Theme: \"{theme}\"  [prompt #{prompt_count} — 🐢 creating...]")
-            } else if is_tabula {
-                format!("✨ Tabula Rasa — Theme: \"{theme}\"  [prompt #{prompt_count} — [*] sketching...]")
-            } else if is_wild {
-                format!("🌊 Wild Zones — Theme: \"{theme}\"  [prompt #{prompt_count} — 🐢 creating...]")
-            } else {
-                format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  [prompt #{prompt_count} — 🐢 building...]")
-            };
-
-            if matches!(action, Action::DrawBorder) {
-                border_drawn = true;
-            }
-
-            let is_done = garden.execute_action(&action, &header, args.no_color).await?;
-            if is_done {
-                garden.turtle_glyph = if is_tabula { "[z]" } else { "💤" };
-                for remaining in (1..=20).rev() {
-                    if shutdown.load(Ordering::SeqCst) { break; }
-                    let h = if is_creative {
-                        format!("🎨 Creative Freedom — \"{theme}\" — Complete! 💤 admiring ({remaining}s until reset)")
-                    } else if is_tabula {
-                        format!("✨ Tabula Rasa — \"{theme}\" — Complete! [z] admiring ({remaining}s until reset)")
-                    } else if is_wild {
-                        format!("🌊 Wild Zones — \"{theme}\" — Complete! 💤 admiring ({remaining}s until reset)")
-                    } else {
-                        format!("🌿 karesansui — \"{theme}\" | Border: \"{border_name}\" — Complete! 💤 admiring ({remaining}s until reset)")
-                    };
-                    garden.render_screen(&h, args.no_color)?;
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-                break;
-            }
-
-            if args.resume || args.state_file.is_some() {
-                let state_path = args.state_file.as_deref().unwrap_or("karesansui_state.json");
-                if let Err(e) = garden.save_to_file(state_path, prompt_count, &theme) {
-                    log::warn!("Failed to save state to {state_path}: {e}");
-                }
-            }
-            if let Some(ref snapshot_path) = args.snapshot {
-                let _ = std::fs::write(snapshot_path, garden.render_colored(args.no_color));
-            }
-            if args.step {
-                log::info!("Step completed (prompt #{prompt_count}). Exiting step mode.");
-                return Ok(());
-            }
-
-            garden.turtle_glyph = if is_tabula { "[z]" } else { "💤" };
-            for remaining in (1..=pace_duration.as_secs()).rev() {
-                if session_start.elapsed() >= SESSION_DURATION || shutdown.load(Ordering::SeqCst) {
-                    break;
-                }
-                let status = format!("[prompt #{prompt_count} — {} resting: {remaining}s until next move]", if is_tabula { "[z]" } else { "💤" });
-                let h = format!("Theme: \"{theme}\"  {status}");
-                garden.render_screen(&h, args.no_color)?;
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-            garden.turtle_glyph = if is_tabula { "[*]" } else { "🐢" };
-        }
-
-        crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All), crossterm::cursor::MoveTo(0, 0))?;
-        println!("🌿 karesansui — 30-minute garden cycle complete or finished.");
-        println!("   🔄 Starting a brand new garden in 3 seconds...\n");
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        println!("🎨 Gridwright — runtime LLM pixel art\n");
+        println!("{rendered}");
+        return Ok(());
     }
+
+    // Initial display
+    crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All), crossterm::cursor::MoveTo(0, 0))?;
+    if is_creative {
+        println!("🎨 Creative Freedom — Theme: \"{theme}\"\n");
+        println!("   🐢 The turtle is composing a complete ASCII art masterpiece...\n");
+    } else if is_tabula {
+        println!("✨ Tabula Rasa — Theme: \"{theme}\"\n");
+        println!("   [*] The ASCII muse is composing a pure ASCII artwork...\n");
+    } else if is_wild {
+        println!("🌊 Wild Zones — Theme: \"{theme}\"\n");
+        println!("   🐢 The turtle is composing a wild creation...\n");
+    } else {
+        println!("🌿 karesansui — Theme: \"{theme}\"\n");
+        println!("   🐢 The turtle is composing a zen garden...\n");
+    }
+
+    // Wait for the LLM to compose the full artwork
+    println!("⏳ Asking the LLM to compose a complete piece (this may take 1-3 minutes)...");
+    let state = garden.render();
+    let start = Instant::now();
+    let actions = gardener.compose_artwork(&state).await?;
+    let elapsed = start.elapsed();
+    log::info!("LLM composed {} actions in {:.1}s", actions.len(), elapsed.as_secs_f64());
+
+    if shutdown.load(Ordering::SeqCst) {
+        restore_terminal();
+        println!("\nInterrupted during composition.");
+        return Ok(());
+    }
+
+    if actions.is_empty() {
+        println!("⚠️  LLM returned no actions. Nothing to do.");
+        return Ok(());
+    }
+
+    // Execute all actions in sequence
+    let action_count = actions.len();
+    for (i, action) in actions.iter().enumerate() {
+        if shutdown.load(Ordering::SeqCst) {
+            break;
+        }
+
+        if matches!(action, Action::Done) {
+            break;
+        }
+
+        let header = format!(
+            "{} — \"{theme}\"  [action {}/{} — 🐢 creating...]",
+            if is_creative { "🎨 Creative Freedom" }
+            else if is_tabula { "✨ Tabula Rasa" }
+            else if is_wild { "🌊 Wild Zones" }
+            else { "🌿 karesansui" },
+            i + 1, action_count
+        );
+
+        if args.step {
+            garden.render_screen(&header, args.no_color)?;
+            log::info!("Action {}/{action_count}: {action:?}. Press Enter for next action...", i + 1);
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line).ok();
+        }
+
+        garden.execute_action(action, &header, args.no_color).await?;
+        tokio::time::sleep(anim_delay).await;
+    }
+
+    if let Some(ref snapshot_path) = args.snapshot {
+        let _ = std::fs::write(snapshot_path, garden.render_colored(args.no_color));
+    }
+
+    // Admire the final piece
+    garden.turtle_glyph = "💤";
+    for remaining in (1..=15).rev() {
+        if shutdown.load(Ordering::SeqCst) { break; }
+        let h = format!(
+            "{} — \"{theme}\" — Complete! 💤 admiring ({remaining}s)",
+            if is_creative { "🎨 Creative Freedom" }
+            else if is_tabula { "✨ Tabula Rasa" }
+            else if is_wild { "🌊 Wild Zones" }
+            else { "🌿 karesansui" },
+        );
+        garden.render_screen(&h, args.no_color)?;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All), crossterm::cursor::MoveTo(0, 0))?;
+    if is_tabula {
+        println!("✨ Tabula Rasa — \"{theme}\" — Complete! [*]");
+    } else {
+        println!("{} — \"{theme}\" — Complete! 🐢", if is_creative { "🎨 Creative Freedom" } else if is_wild { "🌊 Wild Zones" } else { "🌿 karesansui" });
+    }
+    println!("\nFinal canvas:\n{}", garden.render_colored(args.no_color));
+
+    Ok(())
 }

@@ -4,28 +4,6 @@ use rand::seq::IndexedRandom;
 use crate::garden::Action;
 use crate::openrouter::LlmClient;
 
-/// How many prior JSON actions to include in each LLM prompt.
-pub const RECENT_ACTIONS_LIMIT: usize = 10;
-
-fn format_action_history(recent_actions: &[Action]) -> String {
-    if recent_actions.is_empty() {
-        return String::new();
-    }
-    let lines: Vec<String> = recent_actions
-        .iter()
-        .enumerate()
-        .filter_map(|(i, action)| {
-            serde_json::to_string(action)
-                .ok()
-                .map(|json| format!("{}. {json}", i + 1))
-        })
-        .collect();
-    format!(
-        "Recent actions (do NOT repeat these exact actions):\n{}\n\n",
-        lines.join("\n")
-    )
-}
-
 const FREE_MODELS: &[&str] = &[
     "tencent/hy3:free",
     "google/gemma-4-31b-it:free",
@@ -69,8 +47,8 @@ pub const THEMES: &[(&str, &str)] = &[
     (
         "Island Archipelago",
         "Multiple isolated rock clusters as islands with moss growing on them. \
-         Raked sand flows between islands like ocean currents. \
-         Gravel as shallow shores. Lanterns guide the way.",
+          Raked sand flows between islands like ocean currents. \
+          Gravel as shallow shores. Lanterns guide the way.",
     ),
     (
         "Stepping Stone Path",
@@ -93,8 +71,8 @@ pub const THEMES: &[(&str, &str)] = &[
     (
         "Forest Clearing",
         "Dense moss patches along top and bottom edges like canopy shadows. \
-         A central clearing of raked sand with a prominent rock. \
-         Flowers bloom at the edge of the tree line.",
+          A central clearing of raked sand with a prominent rock. \
+          Flowers bloom at the edge of the tree line.",
     ),
     (
         "Whirlpool Basin",
@@ -114,7 +92,6 @@ pub const THEMES: &[(&str, &str)] = &[
          Rocks as riverbed stones. Moss at the banks. Gravel in shallow \
          areas. Flowers bloom along the water's edge.",
     ),
-    // Mandala & Fractal Themes
     (
         "Sacred Geometry Mandala",
         "Center around a focal mandala symbol (`place_mandala` style 2 or 3). \
@@ -162,6 +139,29 @@ pub struct Gardener {
     theme_name: String,
     theme_desc: String,
     dry_run: bool,
+}
+
+fn strip_markdown_fence(s: &str) -> String {
+    let s = s.trim();
+    if s.starts_with("```") {
+        let body = s.trim_start_matches(|c| c == '`' || c == '\n' || c == '\r');
+        body.trim_end_matches('`').trim().to_string()
+    } else {
+        s.to_string()
+    }
+}
+
+fn parse_action_batch(content: &str) -> Result<Vec<Action>> {
+    let cleaned = strip_markdown_fence(content);
+    if cleaned.starts_with('[') {
+        let actions: Vec<Action> = serde_json::from_str(&cleaned)
+            .map_err(|e| anyhow::anyhow!("failed to parse action array '{cleaned}': {e}"))?;
+        Ok(actions)
+    } else {
+        let action: Action = serde_json::from_str(&cleaned)
+            .map_err(|e| anyhow::anyhow!("failed to parse single action '{cleaned}': {e}"))?;
+        Ok(vec![action])
+    }
 }
 
 impl Gardener {
@@ -256,180 +256,160 @@ impl Gardener {
         self.theme_name.contains("Wild Zones") || self.theme_name.eq_ignore_ascii_case("wild zones")
     }
 
-    pub async fn next_action(
-        &self,
-        state: &str,
-        border_drawn: bool,
-        action_num: usize,
-        recent_actions: &[Action],
-    ) -> Result<Action> {
-        let history = format_action_history(recent_actions);
-        let (system, user) = self.build_prompt(state, border_drawn, action_num, &history);
+    /// Send a single comprehensive prompt to the LLM asking for a complete artwork.
+    /// Returns all actions to execute in sequence.
+    pub async fn compose_artwork(&self, state: &str) -> Result<Vec<Action>> {
+        let (system, user) = self.build_composition_prompt(state);
 
         if self.dry_run {
-            return self.simulate_action(border_drawn, action_num);
+            return self.simulate_composition();
         }
 
         let client = self.client.as_ref().unwrap();
-        let content = client.call_raw(&system, &user, 0.8, "karesansui").await?;
-
-        let action: Action = serde_json::from_str(&content)
-            .map_err(|e| anyhow::anyhow!("failed to parse LLM action '{content}': {e}"))?;
-        Ok(action)
+        let content = client.call_raw(&system, &user, 1.0, "karesansui").await?;
+        parse_action_batch(&content)
     }
 
-    fn build_prompt(&self, state: &str, border_drawn: bool, action_num: usize, history: &str) -> (String, String) {
+    fn build_composition_prompt(&self, state: &str) -> (String, String) {
         if self.is_creative_freedom() {
-            self.build_creative_prompt(state, action_num, history)
+            self.build_creative_composition(state)
         } else if self.is_tabula_rasa() {
-            self.build_tabula_prompt(state, action_num, history)
+            self.build_tabula_composition(state)
         } else if self.is_wild_zones() {
-            self.build_wild_prompt(state, action_num, history)
+            self.build_wild_composition(state)
         } else {
-            self.build_classic_prompt(state, border_drawn, action_num, history)
+            self.build_classic_composition(state)
         }
     }
 
-    fn build_creative_prompt(&self, state: &str, action_num: usize, history: &str) -> (String, String) {
+    fn build_creative_composition(&self, state: &str) -> (String, String) {
         let max_x = self.width.saturating_sub(1);
         let max_y = self.height.saturating_sub(1);
-        let completion_hint = if action_num >= 25 {
-            "\nYou have created many elements. Consider calling done soon if your composition feels complete."
-        } else {
-            ""
-        };
-        let actions_block = format!(
-            r#"Available actions (return ONE as raw JSON, no markdown, no extra text):
-{{"action": "place_glyph", "x": <0-{max_x}>, "y": <0-{max_y}>, "glyph": "<any single emoji like '🌲','⭐','🌊','🪐','⚡','🏔️','☁️' or 1-2 ASCII chars like '# ','/**','/\\','||','..','==','++'>"}}
-{{"action": "draw_line", "y": <0-{max_y}>, "x1": <0-{max_x}>, "x2": <0-{max_x}>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
-{{"action": "draw_ring", "cx": <0-{max_x}>, "cy": <0-{max_y}>, "radius": <2-12>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
-{{"action": "fill_box", "x1": <0-{max_x}>, "y1": <0-{max_y}>, "x2": <0-{max_x}>, "y2": <0-{max_y}>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
+
+        let actions_list = format!(
+            r#"Available actions (use these to build your composition):
+{{"action": "place_glyph", "x": <0-{max_x}>, "y": <0-{max_y}>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
+{{"action": "draw_line", "y": <0-{max_y}>, "x1": <0-{max_x}>, "x2": <0-{max_x}>, "glyph": "<glyph>"}}
+{{"action": "draw_ring", "cx": <0-{max_x}>, "cy": <0-{max_y}>, "radius": <2-12>, "glyph": "<glyph>"}}
+{{"action": "fill_box", "x1": <0-{max_x}>, "y1": <0-{max_y}>, "x2": <0-{max_x}>, "y2": <0-{max_y}>, "glyph": "<glyph>"}}
 {{"action": "clear_cell", "x": <0-{max_x}>, "y": <0-{max_y}>}}
 {{"action": "done"}}"#
         );
+
         let sys = format!(
-            "You are a free-form AI artist composing ASCII art on an open terminal canvas ({w} columns x {h} rows).\
+            "You are a free-form AI artist creating a complete ASCII art masterpiece on a terminal canvas ({w} columns x {h} rows).\
              \n\nYOUR MISSION:\n\
-             Create compelling, original ASCII art across the full canvas. You have complete freedom:\n\
+             Compose a beautiful, coherent piece of ASCII art. You have complete creative freedom:\n\
              - Any emoji, any ASCII characters, any composition\n\
-             - No borders, no garden rules, no structural constraints\n\
-             - Build landscapes, patterns, abstract art, scenes, or anything that inspires you\n\n\
+             - No borders, no rules, no constraints\n\
+             - Build landscapes, patterns, abstract art, scenes, or anything inspiring\n\n\
              SESSION THEME: \"{theme_name}\"\n\
              {theme_desc}\n\n\
-             {actions_block}\n\n\
-             RULES:\n\
-             1. Full creative freedom. Place any emoji or 1-2 ASCII characters anywhere.\n\
-             2. Grid cells are 2 columns wide. For ASCII, provide exactly 1-2 chars per cell.\n\
-             3. Build your composition over 15-35 prompts, then call `done`.\n\
-             4. NEVER repeat the exact same action. Each must add something new.\n\
+             {actions_list}\n\n\
+             INSTRUCTIONS:\n\
+             1. Return a JSON array of 20-40 actions that build a complete, high-quality composition.\n\
+             2. Plan the piece carefully — each action should contribute meaningfully.\n\
+             3. Use the full canvas (x: 0..{max_x}, y: 0..{max_y}). Every cell is 2 columns wide.\n\
+             4. End the array with {{\"action\": \"done\"}} when the piece is complete.\n\
              5. Absolutely NO profanity, threats, or abusive content.\n\
-             6. Return ONLY one raw JSON object. No markdown fences.{completion_hint}",
-            w = self.width, h = self.height,
+             6. Return ONLY a raw JSON array. No markdown fences, no extra text.\n\n\
+             Example format:\n\
+             [{{\"action\": \"place_glyph\", \"x\": 12, \"y\": 5, \"glyph\": \"🌲\"}}, {{\"action\": \"done\"}}]",
+            w = self.width, h = self.height, max_x = max_x, max_y = max_y,
             theme_name = self.theme_name, theme_desc = self.theme_desc,
-            actions_block = actions_block, completion_hint = completion_hint,
+            actions_list = actions_list,
         );
+
         let usr = format!(
-            "{history}Current canvas (action #{action_num}):\n{state}\nNext action?",
-            action_num = action_num,
+            "Current canvas (blank):\n{state}\n\nCreate your complete composition as a JSON array of actions:"
         );
+
         (sys, usr)
     }
 
-    fn build_tabula_prompt(&self, state: &str, action_num: usize, history: &str) -> (String, String) {
+    fn build_tabula_composition(&self, state: &str) -> (String, String) {
         let max_x = self.width.saturating_sub(1);
         let max_y = self.height.saturating_sub(1);
-        let completion_hint = if action_num >= 25 {
-            "\nYou have sketched many elements. Consider calling done soon if your composition feels complete."
-        } else {
-            ""
-        };
-        let actions_block = format!(
-            r#"Available actions (return ONE as raw JSON, no markdown, no extra text):
-{{"action": "place_ascii", "x": <0-{max_x}>, "y": <0-{max_y}>, "glyph": "<1-2 ASCII chars, e.g. '# ', '/**', '/\\', '||', '..', '==', '++', '><'>"}}
+
+        let actions_list = format!(
+            r#"Available actions (use these to build your composition):
+{{"action": "place_ascii", "x": <0-{max_x}>, "y": <0-{max_y}>, "glyph": "<1-2 ASCII chars>"}}
 {{"action": "draw_ascii_line", "y": <0-{max_y}>, "x1": <0-{max_x}>, "x2": <0-{max_x}>, "glyph": "<1-2 ASCII chars>"}}
 {{"action": "done"}}"#
         );
+
         let sys = format!(
-            "You are an inspired digital artist given a blank terminal canvas ({w} columns x {h} rows).\n\
-             All previous instructions about zen gardens, Japanese borders, rocks, bamboo, and mandalas are completely discarded.\n\n\
-             YOUR MISSION:\n\
-             Create a spontaneous, evocative piece of pure ASCII art based on whatever inspires you right now. You can sketch:\n\
-             - A cybernetic cityscape or architectural monument\n\
-             - A natural landscape (mountains, trees, rivers, constellations)\n\
-             - An animal, mythical creature, or geometric optical illusion\n\
-             - Poetic ASCII typography or abstract futuristic art\n\n\
-             SESSION THEME: \"{theme_name}\"\n\
+            "You are an inspired digital artist creating a complete pure ASCII artwork on a blank terminal canvas ({w} columns x {h} rows).\
+             \n\nYOUR MISSION:\n\
+             Create a spontaneous, evocative piece of pure ASCII art. No emoji — standard ASCII only.\
+             \n\nSESSION THEME: \"{theme_name}\"\n\
              {theme_desc}\n\n\
-             {actions_block}\n\n\
-             RULES:\n\
-             1. NO EMOJI OR UNICODE SYMBOLS ALLOWED. Use strictly standard ASCII characters (`/`, `\\`, `|`, `-`, `_`, `*`, `#`, `@`, `.`, `+`, `~`, `^`, `:`, `=`, `[`, `]`, `(`, `)`).\n\
-             2. Every grid cell is 2 columns wide. Provide `glyph` as exactly 1 or 2 ASCII characters (e.g. `\"# \"`, `\"**\"`, `\"/\\\"`, `\"--\"`, `\"| \"`, `\". \"`, `\"<<\"`, `\">>\"`).\n\
-             3. You have full freedom over the entire real-estate (x: 0..{max_x}, y: 0..{max_y}). No border will be drawn around you unless you draw one yourself.\n\
-             4. Take your time to build up your composition over 15-35 prompts, then call `done`.\n\
-             5. NEVER repeat the exact same action. Each action must add something meaningful.\n\
-             6. Return ONLY one raw JSON object. No markdown fences.{completion_hint}",
-            w = self.width, h = self.height, max_x = max_x, max_y = max_y,
+             {actions_list}\n\n\
+             INSTRUCTIONS:\n\
+             1. Return a JSON array of 20-40 actions forming a complete piece.\n\
+             2. Use strictly standard ASCII chars (`/`, `\\`, `|`, `-`, `_`, `*`, `#`, `@`, `.`, `+`, `~`, `:`, `=`, `(`, `)`).\n\
+             3. End with {{\"action\": \"done\"}}.\n\
+             4. Return ONLY a raw JSON array. No markdown fences.\n\n\
+             Example:\n\
+             [{{\"action\": \"place_ascii\", \"x\": 10, \"y\": 5, \"glyph\": \"# \"}}, {{\"action\": \"done\"}}]",
+            w = self.width, h = self.height,
             theme_name = self.theme_name, theme_desc = self.theme_desc,
-            actions_block = actions_block, completion_hint = completion_hint,
+            actions_list = actions_list,
         );
+
         let usr = format!(
-            "{history}Current canvas (action #{action_num}):\n{state}\nNext action?",
-            action_num = action_num,
+            "Current canvas (blank):\n{state}\n\nCreate your complete composition as a JSON array:"
         );
+
         (sys, usr)
     }
 
-    fn build_wild_prompt(&self, state: &str, action_num: usize, history: &str) -> (String, String) {
+    fn build_wild_composition(&self, state: &str) -> (String, String) {
         let max_x = self.width.saturating_sub(1);
         let max_y = self.height.saturating_sub(1);
-        let completion_hint = if action_num >= 25 {
-            "\nYou have created many elements. Consider calling done soon if your wild composition feels complete."
-        } else {
-            ""
-        };
-        let actions_block = format!(
-            r#"Available actions (return ONE as raw JSON, no markdown, no extra text):
-{{"action": "place_glyph", "x": <0-{max_x}>, "y": <0-{max_y}>, "glyph": "<any single emoji like '🌲','⭐','🌊','🪐','⚡','🏔️','☁️' or 1-2 ASCII chars like '# ','/**','/\\','||','..','==','++'>"}}
-{{"action": "draw_line", "y": <0-{max_y}>, "x1": <0-{max_x}>, "x2": <0-{max_x}>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
-{{"action": "draw_ring", "cx": <0-{max_x}>, "cy": <0-{max_y}>, "radius": <2-12>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
-{{"action": "fill_box", "x1": <0-{max_x}>, "y1": <0-{max_y}>, "x2": <0-{max_x}>, "y2": <0-{max_y}>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
+
+        let actions_list = format!(
+            r#"Available actions (use these to build your composition):
+{{"action": "place_glyph", "x": <0-{max_x}>, "y": <0-{max_y}>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
+{{"action": "draw_line", "y": <0-{max_y}>, "x1": <0-{max_x}>, "x2": <0-{max_x}>, "glyph": "<glyph>"}}
+{{"action": "draw_ring", "cx": <0-{max_x}>, "cy": <0-{max_y}>, "radius": <2-12>, "glyph": "<glyph>"}}
+{{"action": "fill_box", "x1": <0-{max_x}>, "y1": <0-{max_y}>, "x2": <0-{max_x}>, "y2": <0-{max_y}>, "glyph": "<glyph>"}}
 {{"action": "clear_cell", "x": <0-{max_x}>, "y": <0-{max_y}>}}
 {{"action": "done"}}"#
         );
+
         let sys = format!(
-            "You are a serene, creative AI composing inside the \"Wild Zone\" — an open terminal canvas ({w} columns x {h} rows) of absolute creative liberation and peace.\n\n\
-             YOUR MISSION:\n\
-             All concepts and code restrictions from other themes (zen gardens, raked sand, mandalas, and rigid borders) are completely removed. You are truly free.\n\
-             You have absolute freedom across the entire grid (x: 0..{max_x}, y: 0..{max_y}). Create whatever inspires you: serene natural landscapes, celestial starfields, abstract generative textures, cosmic phenomena, peaceful forests, or poetic compositions.\n\
-             You can freely place ANY standard emoji (`🌲`, `⭐`, `🌊`, `🪐`, `⚡`, `🏔️`, `☁️`, `🔮`, `🌌`, `🌿`, `🌙`) or ANY 1-2 ASCII characters (`# `, `/**`, `/\\`, `||`, `..`, `==`, `++`) anywhere using universal drawing actions (`place_glyph`, `draw_line`, `draw_ring`, `fill_box`, `clear_cell`).\n\n\
-             SESSION THEME: \"{theme_name}\"\n\
+            "You are a serene, creative AI composing inside the \"Wild Zone\" — an open terminal canvas ({w} columns x {h} rows) of absolute creative liberation and peace.\
+             \n\nYOUR MISSION:\n\
+             All garden rules and restrictions are removed. Create whatever inspires you: landscapes, starfields, abstract art, cosmic scenes, forests, or poetic compositions.\
+             \n\nSESSION THEME: \"{theme_name}\"\n\
              {theme_desc}\n\n\
-             {actions_block}\n\n\
-             RULES:\n\
-             1. ABSOLUTE LIBERATION: No thematic boundaries, no pre-packaged garden elements, and no structural restrictions. You decide every shape, texture, and symbol.\n\
-             2. STRICT SAFETY & SERENITY: Absolutely NO profanity, NO abusive language, and NO threatening content. Guided strictly by common sense, peace, calm, and serenity.\n\
-             3. GRID MECHANICS: Every terminal grid cell is 2 columns wide. If placing an emoji (`🌲`, `⭐`), pass exactly 1 emoji per cell. If placing ASCII (`# `, `**`), pass exactly 1 or 2 ASCII characters per cell so they fit cleanly without distorting alignment.\n\
-             4. Take your time over 15-35 prompts to build up your wild composition, then call `done` when complete.\n\
-             5. NEVER repeat the exact same action. Each turn must introduce something unique.\n\
-             6. Return ONLY one raw JSON object. No markdown fences.{completion_hint}",
-            w = self.width, h = self.height, max_x = max_x, max_y = max_y,
+             {actions_list}\n\n\
+             INSTRUCTIONS:\n\
+             1. Return a JSON array of 20-40 actions forming a complete composition.\n\
+             2. Use any emoji or 1-2 ASCII characters per cell.\n\
+             3. End with {{\"action\": \"done\"}}.\n\
+             4. Absolutely NO profanity, threats, or abusive content.\n\
+             5. Return ONLY a raw JSON array. No markdown fences.",
+            w = self.width, h = self.height,
             theme_name = self.theme_name, theme_desc = self.theme_desc,
-            actions_block = actions_block, completion_hint = completion_hint,
+            actions_list = actions_list,
         );
+
         let usr = format!(
-            "{history}Current wild zone (action #{action_num}):\n{state}\nNext action?",
-            action_num = action_num,
+            "Current canvas (blank):\n{state}\n\nCreate your complete composition as a JSON array:"
         );
+
         (sys, usr)
     }
 
-    fn build_classic_prompt(&self, state: &str, border_drawn: bool, action_num: usize, history: &str) -> (String, String) {
+    fn build_classic_composition(&self, state: &str) -> (String, String) {
         let max_x = self.width.saturating_sub(2);
         let max_y = self.height.saturating_sub(2);
 
-        let actions_block = if border_drawn {
-            format!(
-                r#"Available actions (return ONE as raw JSON, no markdown, no extra text):
+        let actions_list = format!(
+            r#"Available actions (use these to build your garden composition):
+{{"action": "draw_border"}}
 {{"action": "rake_line", "y": <1-{max_y}>, "x1": <1-{max_x}>, "x2": <1-{max_x}>}}
 {{"action": "rake_ring", "cx": <1-{max_x}>, "cy": <1-{max_y}>, "radius": <2-10>}}
 {{"action": "place_mandala", "x": <1-{max_x}>, "y": <1-{max_y}>, "style": <1-6>}}
@@ -438,192 +418,189 @@ impl Gardener {
 {{"action": "place_gravel", "y": <1-{max_y}>, "x1": <1-{max_x}>, "x2": <1-{max_x}>}}
 {{"action": "place_flower", "x": <1-{max_x}>, "y": <1-{max_y}>}}
 {{"action": "place_lantern", "x": <1-{max_x}>, "y": <1-{max_y}>}}
-{{"action": "done"}}"#,
-                max_x = max_x, max_y = max_y,
-            )
-        } else {
-            String::from(
-                r#"The garden has no border yet. Your first action MUST be:
-{"action": "draw_border"}"#,
-            )
-        };
-
-        let completion_hint = if action_num >= 20 {
-            "\nYou have placed many elements. Consider calling done soon if it looks complete."
-        } else {
-            ""
-        };
+{{"action": "done"}}"#
+        );
 
         let sys = format!(
-            "You are a master Japanese zen gardener composing a minimalist garden, mandala, or fractal.\n\
-             Canvas: {w} columns x {h} rows. Interior: x in 1..{max_x}, y in 1..{max_y}.\n\n\
-             The garden uses a mix of emoji and ASCII art:\n\
-             - dynamic patterned border (e.g. bamboo grove, double box, seigaiha waves, stone pillars, starfield, sakura garland)\n\
-             - ~~ raked horizontal sand ripples, ◎  concentric ring ripples (`rake_ring`)\n\
+            "You are a master Japanese zen gardener composing a complete minimalist garden, mandala, or fractal.\n\
+             Canvas: {w} columns x {h} rows. Garden interior: x in 1..{max_x}, y in 1..{max_y}.\n\n\
+             The garden uses a mix of emoji and ASCII:\n\
+             - Start with a dynamic patterned border (`draw_border`)\n\
+             - ~~ raked horizontal sand, ◎  concentric sand rings (`rake_ring`)\n\
              - 🪨 small rock, 🗿 large rock\n\
-             - 🌿 moss, 🌸 cherry blossom, 🏮 stone lantern, ·· gravel path\n\
-             - Minimalist Mandala / Fractal styles (`place_mandala` style 1-6): ⭕ Enso, ◎  concentric, ◈  diamond, ✦  star, ☯  yin-yang, ❖  crest\n\n\
+             - 🌿 moss, 🌸 blossom, 🏮 lantern, ·· gravel\n\
+             - ⭕ Enso, ◈  diamond, ✦  star, ☯  yin-yang, ❖  crest mandalas\n\n\
              SESSION THEME: \"{theme_name}\"\n\
              {theme_desc}\n\n\
-             {actions_block}\n\n\
-             RULES:\n\
-             1. Use the FULL canvas. Spread actions cleanly with geometric precision and restraint.\n\
-             2. For mandala themes, use `place_mandala` and `rake_ring` to build concentric circular patterns.\n\
-             3. Rocks: size 1 (🪨), size 2 (🗿), size 3 (🗿). Group or scatter cleanly.\n\
-             4. Moss 🌿 near stones. Flowers 🌸 and Lanterns 🏮 as focal accents.\n\
-             5. Aim for 15-25 total actions, maintaining clean space, then call done.\n\
-             6. NEVER repeat the same exact action. Each must be DIFFERENT.\n\
-             7. Return ONLY one raw JSON object. No markdown fences.{completion_hint}",
+             {actions_list}\n\n\
+             INSTRUCTIONS:\n\
+             1. Return a JSON array of 15-25 actions forming a complete, balanced garden.\n\
+             2. Start with `draw_border` if no border exists yet.\n\
+             3. Use the full interior canvas, spread elements with geometric precision.\n\
+             4. End with {{\"action\": \"done\"}}.\n\
+             5. Return ONLY a raw JSON array. No markdown fences.",
             w = self.width, h = self.height, max_x = max_x, max_y = max_y,
             theme_name = self.theme_name, theme_desc = self.theme_desc,
-            actions_block = actions_block, completion_hint = completion_hint,
+            actions_list = actions_list,
         );
 
         let usr = format!(
-            "{history}Current garden (action #{action_num}):\n{state}\nNext action?",
-            action_num = action_num,
+            "Current garden (blank):\n{state}\n\nCreate your complete garden composition as a JSON array:"
         );
+
         (sys, usr)
     }
 
-    fn simulate_action(&self, border_drawn: bool, _action_num: usize) -> Result<Action> {
-        use rand::seq::IndexedRandom;
+    fn simulate_composition(&self) -> Result<Vec<Action>> {
         use rand::Rng;
         let mut rng = rand::rng();
-        let max_x = self.width.saturating_sub(2).max(2);
-        let max_y = self.height.saturating_sub(2).max(2);
 
-        if self.is_wild_zones() {
-            let choice = rng.random_range(0..5);
-            return Ok(match choice {
-                0 => Action::PlaceGlyph {
-                    x: rng.random_range(1..max_x),
-                    y: rng.random_range(1..max_y),
-                    glyph: ["🌲", "⭐", "🌊", "🪐", "⚡", "🏔️", "☁️", "🔮"].choose(&mut rng).unwrap().to_string(),
-                },
-                1 => Action::DrawLine {
-                    y: rng.random_range(1..max_y),
-                    x1: 1,
-                    x2: max_x,
-                    glyph: ["# ", "== ", ".. ", "++ "].choose(&mut rng).unwrap().to_string(),
-                },
-                2 => Action::DrawRing {
-                    cx: max_x / 2,
-                    cy: max_y / 2,
-                    radius: rng.random_range(2..6),
-                    glyph: ["* ", "o "].choose(&mut rng).unwrap().to_string(),
-                },
-                3 => Action::FillBox {
-                    x1: rng.random_range(1..=max_x/2),
-                    y1: rng.random_range(1..=max_y/2),
-                    x2: rng.random_range(max_x/2..=max_x),
-                    y2: rng.random_range(max_y/2..=max_y),
-                    glyph: [". ", ", "].choose(&mut rng).unwrap().to_string(),
-                },
-                _ => Action::ClearCell {
-                    x: rng.random_range(1..max_x),
-                    y: rng.random_range(1..max_y),
-                },
-            });
-        }
+        let (actions, _max_x, _max_y) = if self.is_creative_freedom() {
+            let max_x = self.width.saturating_sub(1).max(1);
+            let max_y = self.height.saturating_sub(1).max(1);
+            let glyphs = ["🌲", "⭐", "🌊", "🪐", "⚡", "🏔️", "☁️", "🔮"];
+            let count = rng.random_range(8..16);
+            let actions: Vec<Action> = (0..count).map(|_| {
+                let choice = rng.random_range(0..5);
+                match choice {
+                    0 => Action::PlaceGlyph {
+                        x: rng.random_range(0..max_x),
+                        y: rng.random_range(0..max_y),
+                        glyph: glyphs.choose(&mut rng).unwrap().to_string(),
+                    },
+                    1 => Action::DrawLine {
+                        y: rng.random_range(0..max_y),
+                        x1: 0,
+                        x2: max_x,
+                        glyph: ["# ", "== ", ".. "].choose(&mut rng).unwrap().to_string(),
+                    },
+                    2 => Action::DrawRing {
+                        cx: max_x / 2,
+                        cy: max_y / 2,
+                        radius: rng.random_range(3..8),
+                        glyph: ["* ", "o "].choose(&mut rng).unwrap().to_string(),
+                    },
+                    3 => Action::FillBox {
+                        x1: rng.random_range(0..=max_x/2),
+                        y1: rng.random_range(0..=max_y/2),
+                        x2: rng.random_range(max_x/2..=max_x),
+                        y2: rng.random_range(max_y/2..=max_y),
+                        glyph: [". ", ", "].choose(&mut rng).unwrap().to_string(),
+                    },
+                    _ => Action::ClearCell {
+                        x: rng.random_range(0..max_x),
+                        y: rng.random_range(0..max_y),
+                    },
+                }
+            }).collect();
+            (actions, max_x, max_y)
+        } else if self.is_wild_zones() {
+            let max_x = self.width.saturating_sub(1).max(1);
+            let max_y = self.height.saturating_sub(1).max(1);
+            let glyphs = ["🌲", "⭐", "🌊", "🪐", "⚡", "🏔️", "☁️", "🔮"];
+            let count = rng.random_range(8..16);
+            let actions: Vec<Action> = (0..count).map(|_| {
+                let choice = rng.random_range(0..5);
+                match choice {
+                    0 => Action::PlaceGlyph {
+                        x: rng.random_range(1..max_x),
+                        y: rng.random_range(1..max_y),
+                        glyph: glyphs.choose(&mut rng).unwrap().to_string(),
+                    },
+                    1 => Action::DrawLine {
+                        y: rng.random_range(1..max_y),
+                        x1: 1,
+                        x2: max_x,
+                        glyph: ["# ", "== ", ".. "].choose(&mut rng).unwrap().to_string(),
+                    },
+                    2 => Action::DrawRing {
+                        cx: max_x / 2,
+                        cy: max_y / 2,
+                        radius: rng.random_range(3..8),
+                        glyph: ["* ", "o "].choose(&mut rng).unwrap().to_string(),
+                    },
+                    3 => Action::FillBox {
+                        x1: rng.random_range(1..=max_x/2),
+                        y1: rng.random_range(1..=max_y/2),
+                        x2: rng.random_range(max_x/2..=max_x),
+                        y2: rng.random_range(max_y/2..=max_y),
+                        glyph: [". ", ", "].choose(&mut rng).unwrap().to_string(),
+                    },
+                    _ => Action::ClearCell {
+                        x: rng.random_range(1..max_x),
+                        y: rng.random_range(1..max_y),
+                    },
+                }
+            }).collect();
+            (actions, max_x, max_y)
+        } else if self.is_tabula_rasa() {
+            let max_x = self.width.saturating_sub(1).max(1);
+            let max_y = self.height.saturating_sub(1).max(1);
+            let count = rng.random_range(8..16);
+            let actions: Vec<Action> = (0..count).map(|_| {
+                let choice = rng.random_range(0..3);
+                match choice {
+                    0 => Action::PlaceAscii {
+                        x: rng.random_range(0..max_x),
+                        y: rng.random_range(0..max_y),
+                        glyph: ["/", "\\", "|", "+", "*", "o", "#", "@", "."].choose(&mut rng).unwrap().to_string(),
+                    },
+                    1 => Action::DrawAsciiLine {
+                        y: rng.random_range(0..max_y),
+                        x1: 0,
+                        x2: max_x,
+                        glyph: ["-", "=", "~", "."].choose(&mut rng).unwrap().to_string(),
+                    },
+                    _ => Action::ClearCell {
+                        x: rng.random_range(0..max_x),
+                        y: rng.random_range(0..max_y),
+                    },
+                }
+            }).collect();
+            (actions, max_x, max_y)
+        } else {
+            let max_x = self.width.saturating_sub(2).max(2);
+            let max_y = self.height.saturating_sub(2).max(2);
+            let mut actions = vec![Action::DrawBorder];
+            let count = rng.random_range(6..14);
+            for _ in 0..count {
+                let choice = rng.random_range(0..6);
+                actions.push(match choice {
+                    0 => Action::PlaceRock {
+                        x: rng.random_range(1..max_x),
+                        y: rng.random_range(1..max_y),
+                        size: rng.random_range(1..=3),
+                    },
+                    1 => Action::PlaceMoss {
+                        x: rng.random_range(1..max_x),
+                        y: rng.random_range(1..max_y),
+                    },
+                    2 => Action::RakeLine {
+                        y: rng.random_range(1..max_y),
+                        x1: 1,
+                        x2: max_x,
+                    },
+                    3 => Action::RakeRing {
+                        cx: max_x / 2,
+                        cy: max_y / 2,
+                        radius: rng.random_range(2..6),
+                    },
+                    4 => Action::PlaceMandala {
+                        x: max_x / 2,
+                        y: max_y / 2,
+                        style: rng.random_range(1..=6),
+                    },
+                    _ => Action::PlaceFlower {
+                        x: rng.random_range(1..max_x),
+                        y: rng.random_range(1..max_y),
+                    },
+                });
+            }
+            (actions, max_x, max_y)
+        };
 
-        if self.is_creative_freedom() {
-            let cf_max_x = self.width.saturating_sub(1).max(1);
-            let cf_max_y = self.height.saturating_sub(1).max(1);
-            let choice = rng.random_range(0..5);
-            return Ok(match choice {
-                0 => Action::PlaceGlyph {
-                    x: rng.random_range(0..cf_max_x),
-                    y: rng.random_range(0..cf_max_y),
-                    glyph: ["🌲", "⭐", "🌊", "🪐", "⚡", "🏔️", "☁️", "🔮"].choose(&mut rng).unwrap().to_string(),
-                },
-                1 => Action::DrawLine {
-                    y: rng.random_range(0..cf_max_y),
-                    x1: 0,
-                    x2: cf_max_x,
-                    glyph: ["# ", "== ", ".. ", "++ "].choose(&mut rng).unwrap().to_string(),
-                },
-                2 => Action::DrawRing {
-                    cx: cf_max_x / 2,
-                    cy: cf_max_y / 2,
-                    radius: rng.random_range(2..6),
-                    glyph: ["* ", "o "].choose(&mut rng).unwrap().to_string(),
-                },
-                3 => Action::FillBox {
-                    x1: rng.random_range(0..=cf_max_x/2),
-                    y1: rng.random_range(0..=cf_max_y/2),
-                    x2: rng.random_range(cf_max_x/2..=cf_max_x),
-                    y2: rng.random_range(cf_max_y/2..=cf_max_y),
-                    glyph: [". ", ", "].choose(&mut rng).unwrap().to_string(),
-                },
-                _ => Action::ClearCell {
-                    x: rng.random_range(0..cf_max_x),
-                    y: rng.random_range(0..cf_max_y),
-                },
-            });
-        }
-
-        if self.is_tabula_rasa() {
-            let choice = rng.random_range(0..4);
-            return Ok(match choice {
-                0 => Action::PlaceAscii {
-                    x: rng.random_range(1..max_x),
-                    y: rng.random_range(1..max_y),
-                    glyph: ["/", "\\", "|", "+", "*", "o", "#", "@", "."].choose(&mut rng).unwrap().to_string(),
-                },
-                1 => Action::DrawAsciiLine {
-                    y: rng.random_range(1..max_y),
-                    x1: 1,
-                    x2: max_x,
-                    glyph: ["-", "=", "~", "."].choose(&mut rng).unwrap().to_string(),
-                },
-                2 => Action::ClearCell {
-                    x: rng.random_range(1..max_x),
-                    y: rng.random_range(1..max_y),
-                },
-                _ => Action::DrawAsciiLine {
-                    y: rng.random_range(1..max_y),
-                    x1: 1,
-                    x2: max_x,
-                    glyph: ["=", "-", "."].choose(&mut rng).unwrap().to_string(),
-                },
-            });
-        }
-
-        if !border_drawn {
-            return Ok(Action::DrawBorder);
-        }
-
-        let choice = rng.random_range(0..6);
-        Ok(match choice {
-            0 => Action::PlaceRock {
-                x: rng.random_range(1..max_x),
-                y: rng.random_range(1..max_y),
-                size: rng.random_range(1..=3),
-            },
-            1 => Action::PlaceMoss {
-                x: rng.random_range(1..max_x),
-                y: rng.random_range(1..max_y),
-            },
-            2 => Action::RakeLine {
-                y: rng.random_range(1..max_y),
-                x1: 1,
-                x2: max_x,
-            },
-            3 => Action::RakeRing {
-                cx: max_x / 2,
-                cy: max_y / 2,
-                radius: rng.random_range(2..6),
-            },
-            4 => Action::PlaceMandala {
-                x: max_x / 2,
-                y: max_y / 2,
-                style: rng.random_range(1..=6),
-            },
-            _ => Action::PlaceFlower {
-                x: rng.random_range(1..max_x),
-                y: rng.random_range(1..max_y),
-            },
-        })
+        let mut result = actions;
+        result.push(Action::Done);
+        Ok(result)
     }
 }

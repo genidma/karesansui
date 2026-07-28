@@ -151,7 +151,6 @@ pub const CREST: &str = "❖ ";
 /// A geometric, patterned, and aesthetically pleasing border style.
 #[derive(Debug, Clone)]
 pub struct BorderPattern {
-    pub name: &'static str,
     pub top_left: &'static str,
     pub top_right: &'static str,
     pub bottom_left: &'static str,
@@ -167,103 +166,77 @@ pub struct BorderPattern {
 }
 
 pub const BORDER_PATTERNS: &[BorderPattern] = &[
-    // 1. Classic Bamboo & Kadomatsu Grove
     BorderPattern {
-        name: "Kadomatsu Bamboo Grove",
         top_left: "🎍", top_right: "🎍", bottom_left: "🎍", bottom_right: "🎍",
         top: "🎋", top_alt: "──", bottom: "🎋", bottom_alt: "──",
         left: "│ ", left_alt: "🎋", right: "│ ", right_alt: "🎋",
     },
-    // 2. Sacred Double Box
     BorderPattern {
-        name: "Sacred Double Box",
         top_left: "╔═", top_right: "═╗", bottom_left: "╚═", bottom_right: "═╝",
         top: "══", top_alt: "══", bottom: "══", bottom_alt: "══",
         left: "║ ", left_alt: "║ ", right: "║ ", right_alt: "║ ",
     },
     // 3. Mandala Diamond Lattice
     BorderPattern {
-        name: "Mandala Diamond Lattice",
         top_left: "◈ ", top_right: "◈ ", bottom_left: "◈ ", bottom_right: "◈ ",
         top: "◇ ", top_alt: "◈ ", bottom: "◇ ", bottom_alt: "◈ ",
         left: "◇ ", left_alt: "◈ ", right: "◇ ", right_alt: "◈ ",
     },
     // 4. Seigaiha Ocean Waves
     BorderPattern {
-        name: "Seigaiha Ocean Waves",
         top_left: "🌊", top_right: "🌊", bottom_left: "🌊", bottom_right: "🌊",
         top: "〰〰", top_alt: "≈≈", bottom: "〰〰", bottom_alt: "≈≈",
         left: "≈≈", left_alt: "〰 ", right: "≈≈", right_alt: "〰 ",
     },
     // 5. Stone Pillar & Gravel Shore
     BorderPattern {
-        name: "Stone Pillar & Gravel Shore",
         top_left: "⛩️ ", top_right: "⛩️ ", bottom_left: "🗿", bottom_right: "🗿",
         top: "🪨", top_alt: "··", bottom: "🪨", bottom_alt: "··",
         left: "║ ", left_alt: "🪨", right: "║ ", right_alt: "🪨",
     },
     // 6. Starfield Lattice
     BorderPattern {
-        name: "Starfield Lattice",
         top_left: "🌟", top_right: "🌟", bottom_left: "🌟", bottom_right: "🌟",
         top: "✦ ", top_alt: "✧ ", bottom: "✦ ", bottom_alt: "✧ ",
         left: "✦ ", left_alt: "✧ ", right: "✦ ", right_alt: "✧ ",
     },
     // 7. Enso Yin-Yang Harmony
     BorderPattern {
-        name: "Enso Yin-Yang Harmony",
         top_left: "⭕", top_right: "⭕", bottom_left: "⭕", bottom_right: "⭕",
         top: "──", top_alt: "☯ ", bottom: "──", bottom_alt: "☯ ",
         left: "│ ", left_alt: "│ ", right: "│ ", right_alt: "│ ",
     },
     // 8. Sakura Blossom Garland
     BorderPattern {
-        name: "Sakura Blossom Garland",
         top_left: "🌸", top_right: "🌸", bottom_left: "🌸", bottom_right: "🌸",
         top: "──", top_alt: "🌸", bottom: "──", bottom_alt: "🌸",
         left: "│ ", left_alt: "🌸", right: "│ ", right_alt: "🌸",
     },
     // 9. Engawa Wooden Deck
     BorderPattern {
-        name: "Engawa Wooden Deck",
         top_left: "+-", top_right: "-+", bottom_left: "+-", bottom_right: "-+",
         top: "--", top_alt: "==", bottom: "--", bottom_alt: "==",
         left: "| ", left_alt: "| ", right: "| ", right_alt: "| ",
     },
     // 10. Zen Gravel Ridge
     BorderPattern {
-        name: "Zen Gravel Ridge",
         top_left: "░░", top_right: "░░", bottom_left: "░░", bottom_right: "░░",
         top: "▒▒", top_alt: "░░", bottom: "▒▒", bottom_alt: "░░",
         left: "▒▒", left_alt: "░░", right: "▒▒", right_alt: "░░",
     },
     // 11. Minimalist Dotted Lattice
     BorderPattern {
-        name: "Minimalist Dotted Lattice",
         top_left: "+-", top_right: "-+", bottom_left: "+-", bottom_right: "-+",
         top: "· ", top_alt: "- ", bottom: "· ", bottom_alt: "- ",
         left: ": ", left_alt: "| ", right: ": ", right_alt: "| ",
     },
     // 12. Shimenawa Sacred Rope
     BorderPattern {
-        name: "Shimenawa Sacred Rope",
         top_left: "❖ ", top_right: "❖ ", bottom_left: "❖ ", bottom_right: "❖ ",
         top: "≈≈", top_alt: "──", bottom: "≈≈", bottom_alt: "──",
         left: "│ ", left_alt: "≈≈", right: "│ ", right_alt: "≈≈",
     },
 ];
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GardenState {
-    pub width: usize,
-    pub height: usize,
-    pub grid: Vec<Vec<String>>,
-    pub turtle_pos: Option<(usize, usize)>,
-    pub turtle_glyph: String,
-    pub border_pattern_index: usize,
-    pub prompt_count: usize,
-    pub theme_name: String,
-}
 
 /// The ASCII + emoji zen garden grid.
 /// Each cell is a 2-column-wide string so emojis and ASCII mix cleanly.
@@ -277,7 +250,6 @@ pub struct Garden {
     pub turtle_glyph: &'static str,
     /// The aesthetic border pattern framing this session's garden.
     pub border_pattern: BorderPattern,
-    pub border_pattern_index: usize,
     /// Current ASCII theme affecting rendering behavior
     pub ascii_theme: AsciiTheme,
     /// Layered glyph support for Matrix ASCII
@@ -289,8 +261,7 @@ impl Garden {
         let grid = vec![vec![EMPTY.to_string(); width]; height];
         use rand::Rng;
         let mut rng = rand::rng();
-        let idx = rng.random_range(0..BORDER_PATTERNS.len());
-        let border_pattern = BORDER_PATTERNS[idx].clone();
+        let border_pattern = BORDER_PATTERNS[rng.random_range(0..BORDER_PATTERNS.len())].clone();
         Self {
             width,
             height,
@@ -298,7 +269,6 @@ impl Garden {
             turtle_pos: Some((1, 1)),
             turtle_glyph: "🐢",
             border_pattern,
-            border_pattern_index: idx,
             ascii_theme: AsciiTheme::Classic,
             glyph_layers: HashMap::new(),
         }
@@ -691,49 +661,6 @@ impl Garden {
             out.push('\n');
         }
         out
-    }
-
-    pub fn save_to_file(&self, path: &str, prompt_count: usize, theme_name: &str) -> anyhow::Result<()> {
-        let state = GardenState {
-            width: self.width,
-            height: self.height,
-            grid: self.grid.clone(),
-            turtle_pos: self.turtle_pos,
-            turtle_glyph: self.turtle_glyph.to_string(),
-            border_pattern_index: self.border_pattern_index,
-            prompt_count,
-            theme_name: theme_name.to_string(),
-        };
-        let json = serde_json::to_string_pretty(&state)?;
-        std::fs::write(path, json)?;
-        Ok(())
-    }
-
-    pub fn load_from_file(path: &str) -> anyhow::Result<(Self, usize, String)> {
-        let content = std::fs::read_to_string(path)?;
-        let state: GardenState = serde_json::from_str(&content)?;
-        let border_pattern = BORDER_PATTERNS
-            .get(state.border_pattern_index)
-            .cloned()
-            .unwrap_or_else(|| BORDER_PATTERNS[0].clone());
-        let turtle_glyph = match state.turtle_glyph.as_str() {
-            "💤" => "💤",
-            "[*]" => "[*]",
-            "[z]" => "[z]",
-            _ => "🐢",
-        };
-        let garden = Self {
-            width: state.width,
-            height: state.height,
-            grid: state.grid,
-            turtle_pos: state.turtle_pos,
-            turtle_glyph,
-            border_pattern,
-            border_pattern_index: state.border_pattern_index,
-            ascii_theme: AsciiTheme::Classic,
-            glyph_layers: HashMap::new(),
-        };
-        Ok((garden, state.prompt_count, state.theme_name))
     }
 
     /// Render the current garden state to screen with header.
