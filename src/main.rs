@@ -494,40 +494,6 @@ async fn main() -> Result<()> {
                     render_screen(&header, &garden, args.no_color)?;
                     tokio::time::sleep(Duration::from_millis(300)).await;
                 }
-                Action::PlaceMultiCellGlyph { anchor_x, anchor_y, glyphs } => {
-                    animate_walk(&mut garden, anchor_x, anchor_y, &header, args.no_color).await?;
-                    for (dx, dy, glyph) in glyphs {
-                        garden.place_glyph(anchor_x + dx, anchor_y + dy, &glyph);
-                    }
-                    render_screen(&header, &garden, args.no_color)?;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
-                Action::DrawFlowLine { points, glyph } => {
-                    if let Some((start_x, start_y)) = points.first() {
-                        animate_walk(&mut garden, *start_x, *start_y, &header, args.no_color).await?;
-                    }
-                    for (x, y) in points {
-                        garden.turtle_pos = Some((x, y));
-                        garden.place_glyph(*x, *y, &glyph);
-                        render_screen(&header, &garden, args.no_color)?;
-                        tokio::time::sleep(Duration::from_millis(120)).await;
-                    }
-                }
-                Action::ApplyGlitchFilter { action_x, action_y, filter_type } => {
-                    // Apply glitch filter to cell (action_x, action_y)
-                    // For now, just log the action and place a marker
-                    animate_walk(&mut garden, action_x, action_y, &header, args.no_color).await?;
-                    garden.place_glyph(action_x, action_y, "#");
-                    render_screen(&header, &garden, args.no_color)?;
-                    tokio::time::sleep(Duration::from_millis(300)).await;
-                }
-                Action::PlaceBlendedGlyph { x, y, glyph, blend_mode, opacity } => {
-                    animate_walk(&mut garden, x, y, &header, args.no_color).await?;
-                    // For now, just place with blend indicator
-                    garden.place_glyph(x, y, &format!("{} ({:.0}%)", glyph, opacity * 100.0));
-                    render_screen(&header, &garden, args.no_color)?;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
                 Action::RakeLine { y, x1, x2 } => {
                     animate_walk(&mut garden, x1, y, &header, args.no_color).await?;
                     let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };

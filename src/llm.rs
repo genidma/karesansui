@@ -56,7 +56,8 @@ const FREE_MODELS: &[&str] = &[
     "cohere/north-mini-code:free",
 ];
 
-(
+pub const THEMES: &[(&str, &str)] = &[
+    (
         "Moonlit Reef",
         "A nocturnal ocean scene. Place rock clusters as coral reefs \
          surrounded by sweeping raked sand curves. Use moss as sea-foam \
@@ -164,22 +165,6 @@ const FREE_MODELS: &[&str] = &[
         "True liberation: all zen garden rules, raked sand, mandalas, and rigid borders are completely removed. Guided strictly by peace, calm, and serenity (zero profanity/threats/abuse), you have absolute freedom across the open canvas (`place_glyph`, `draw_line`, `draw_ring`, `fill_box`, `clear_cell`) using any emoji or ASCII characters.",
     ),
     (
-        "Enhanced Tabula Rasa (Proportional ASCII)",
-        "Advanced Tabula Rasa with multi-cell glyphs and proportional scaling. Create complex ASCII art with deliberate grid placement, flow lines, and optimized spacing. Combines ASCII freedom with precise geometric control.",
-    ),
-    (
-        "Chaotic ASCII (Absolute Freedom)",
-        "Maximum creative liberation: variable-width glyphs (1-4 chars), overlapping art, Unicode chaos with escape sequences, and complete removal of all thematic constraints. True artistic freedom across the open canvas.",
-    ),
-    (
-        "Matrix ASCII (Layered Composition)",
-        "Overlapping, layered ASCII art with blend modes and Z-index support. Create complex compositions with depth, transparency, and sophisticated layering techniques. Perfect for building intricate ASCII masterpieces.",
-    ),
-    (
-        "Glitch ASCII (Chaos & Corruption)",
-        "Embrace digital chaos: escape sequence injection, controlled corruption, character swapping, and visual degradation. Push ASCII art into glitchy, unpredictable territory with intentional digital decay and mutation.",
-    ),
-    (
         "Gridwright (The Deliberate Grid as Craft)",
         "Pixel-perfect grid art where every cell is a deliberate choice. Leverages exact coordinate geometry (`vec`), chunky 8-color palettes (`color`), and hard-edge block glyph rendering (`canvas`). Commands include `clear_canvas`, `fill_rectangle`, `draw_rectangle`, `fill_circle`, `draw_circle`, `draw_line_h`, `draw_line_v`, `draw_line_diag`, `draw_path`, and `set_pixel` with 0-indexed palette colors (`color_index: 0..7`) and 2-character wide block glyphs (`██`, `▓▓`, `▒▒`, `░░`) for layered, square-proportional pixel masterpieces.",
     ),
@@ -270,41 +255,6 @@ impl Gardener {
 
     pub fn is_wild_zones(&self) -> bool {
         self.theme_name.contains("Wild Zones") || self.theme_name.eq_ignore_ascii_case("wild zones")
-    }
-
-    pub fn is_chaotic_ascii(&self) -> bool {
-        self.theme_name.contains("Chaotic ASCII") || self.theme_name.eq_ignore_ascii_case("chaotic ascii")
-    }
-
-    pub fn is_enhanced_tabula_rasa(&self) -> bool {
-        self.theme_name.contains("Enhanced Tabula Rasa") || self.theme_name.eq_ignore_ascii_case("enhanced tabula rasa")
-    }
-
-    pub fn is_matrix_ascii(&self) -> bool {
-        self.theme_name.contains("Matrix ASCII") || self.theme_name.eq_ignore_ascii_case("matrix ascii")
-    }
-
-    pub fn is_glitch_ascii(&self) -> bool {
-        self.theme_name.contains("Glitch ASCII") || self.theme_name.eq_ignore_ascii_case("glitch ascii")
-    }
-
-    /// Determine the AsciiTheme enum based on the current theme name
-    pub fn get_ascii_theme(&self) -> Option<crate::garden::AsciiTheme> {
-        if self.is_tabula_rasa() {
-            Some(crate::garden::AsciiTheme::TabulaRasa)
-        } else if self.is_wild_zones() {
-            Some(crate::garden::AsciiTheme::WildZones)
-        } else if self.is_chaotic_ascii() {
-            Some(crate::garden::AsciiTheme::ChaoticASCII)
-        } else if self.is_enhanced_tabula_rasa() {
-            Some(crate::garden::AsciiTheme::EnhancedTabulaRasa)
-        } else if self.is_matrix_ascii() {
-            Some(crate::garden::AsciiTheme::MatrixASCII)
-        } else if self.is_glitch_ascii() {
-            Some(crate::garden::AsciiTheme::GlitchASCII)
-        } else {
-            Some(crate::garden::AsciiTheme::Classic)
-        }
     }
 
     pub async fn next_action(
