@@ -1,5 +1,6 @@
 use anyhow::Result;
 use rand::seq::IndexedRandom;
+use std::time::Duration;
 
 use crate::garden::Action;
 use crate::openrouter::LlmClient;
@@ -206,6 +207,26 @@ fn parse_action_batch(content: &str) -> Result<Vec<Action>> {
     Err(anyhow::anyhow!("failed to parse LLM response as action array or single action: {content}"))
 }
 
+/// Extract the first fenced code block (```...```) from a string. Returns None if no block found.
+fn extract_code_block<'a>(content: &'a str) -> Option<&'a str> {
+    // Find the opening ```
+    let start_marker = "```\n";
+    let start = content.find(start_marker).map(|i| i + start_marker.len())
+        .or_else(|| {
+            // Try with rest of line after ```
+            let idx = content.find("```")?;
+            let rest = &content[idx + 3..];
+            let newline = rest.find('\n')?;
+            Some(idx + 3 + newline + 1)
+        })?;
+    // Find the closing ```
+    let end = content[start..].find("```")?;
+    let block = &content[start..start + end];
+    // Remove trailing newline if present
+    let trimmed = block.strip_suffix('\n').unwrap_or(block);
+    if trimmed.is_empty() { None } else { Some(trimmed) }
+}
+
 impl Gardener {
     pub fn new(
         model: impl Into<String>,
@@ -299,13 +320,20 @@ impl Gardener {
     }
 
     /// Send a single comprehensive prompt to the LLM asking for a complete artwork.
-    /// Returns all actions to execute in sequence. Retries with stricter prompts on parse failure.
+    /// For Creative Freedom mode, uses a completely open-ended prompt where the LLM
+    /// decides what to create and outputs raw ASCII art. For other themes, uses the
+    /// structured action-based JSON prompt.
     pub async fn compose_artwork(&self, state: &str) -> Result<Vec<Action>> {
         if self.dry_run {
             return self.simulate_composition();
         }
 
         let client = self.client.as_ref().unwrap();
+
+        if self.is_creative_freedom() {
+            return self.compose_free_form(client).await;
+        }
+
         let (sys_base, usr) = self.build_composition_prompt(state);
         let mut last_err = String::new();
 
@@ -333,9 +361,50 @@ impl Gardener {
         Err(anyhow::anyhow!("LLM failed to produce valid JSON after 3 attempts. Last error: {last_err}"))
     }
 
+    /// Creative Freedom v2: completely open-ended prompt. The LLM decides what to create
+    /// and outputs raw ASCII/emoji art. Returns DisplayRawArt action with the extracted art.
+    async fn compose_free_form(&self, client: &LlmClient) -> Result<Vec<Action>> {
+        let system = format!(
+            "You are a master at creating ASCII art using high-res ASCII. You have complete freedom \
+             over what you create, provided it is not vulgar or can be construed as something not \
+             desirable by most individuals, and within reason. The terminal canvas is {} columns wide \
+             and {} rows high. Each cell is 2 character-widths, so emojis fit cleanly.\n\n\
+             What would you want to create today and why? Thank you kindly. And if you choose not to \
+             create anything, that is totally alright also. We will just sit here and stare at a \
+             blank terminal. Not being sarcastic.\n\n\
+             Please put the artwork in a fenced code block using triple backticks (```) so we can \
+             display it. The code block can contain any emoji, ASCII, or Unicode characters.",
+            self.width, self.height,
+        );
+
+        let user = "Share your creation. What would you like to make today?".to_string();
+
+        for attempt in 1..=3 {
+            let content = client.call_raw(&system, &user, 1.0, "karesansui").await?;
+            log::info!("LLM creative response received ({} bytes)", content.len());
+
+            // Extract code block if present
+            let art = extract_code_block(&content).unwrap_or(&content);
+            let lines: Vec<String> = art.lines().map(|l| l.to_string()).collect();
+
+            if lines.iter().any(|l| l.trim().len() > 1) {
+                return Ok(vec![Action::DisplayRawArt { lines }]);
+            }
+
+            log::warn!("LLM response had no artwork content (attempt {attempt}/3). Retrying...");
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+
+        // After 3 retries, just show whatever we got
+        let content = client.call_raw(&system, &user, 1.0, "karesansui").await?;
+        let art = extract_code_block(&content).unwrap_or(&content);
+        let lines: Vec<String> = art.lines().map(|l| l.to_string()).collect();
+        Ok(vec![Action::DisplayRawArt { lines }])
+    }
+
     fn build_composition_prompt(&self, state: &str) -> (String, String) {
         if self.is_creative_freedom() {
-            self.build_creative_composition(state)
+            unreachable!("Creative Freedom uses compose_free_form, not build_composition_prompt")
         } else if self.is_tabula_rasa() {
             self.build_tabula_composition(state)
         } else if self.is_wild_zones() {
@@ -343,51 +412,6 @@ impl Gardener {
         } else {
             self.build_classic_composition(state)
         }
-    }
-
-    fn build_creative_composition(&self, state: &str) -> (String, String) {
-        let max_x = self.width.saturating_sub(1);
-        let max_y = self.height.saturating_sub(1);
-
-        let actions_list = format!(
-            r#"Available actions (use these to build your composition):
-{{"action": "place_glyph", "x": <0-{max_x}>, "y": <0-{max_y}>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
-{{"action": "draw_line", "y": <0-{max_y}>, "x1": <0-{max_x}>, "x2": <0-{max_x}>, "glyph": "<glyph>"}}
-{{"action": "draw_ring", "cx": <0-{max_x}>, "cy": <0-{max_y}>, "radius": <2-12>, "glyph": "<glyph>"}}
-{{"action": "fill_box", "x1": <0-{max_x}>, "y1": <0-{max_y}>, "x2": <0-{max_x}>, "y2": <0-{max_y}>, "glyph": "<glyph>"}}
-{{"action": "clear_cell", "x": <0-{max_x}>, "y": <0-{max_y}>}}
-{{"action": "done"}}"#
-        );
-
-        let sys = format!(
-            "You are a free-form AI artist creating a complete ASCII art masterpiece on a terminal canvas ({w} columns x {h} rows).\
-             \n\nYOUR MISSION:\n\
-             Compose a beautiful, coherent piece of ASCII art. You have complete creative freedom:\n\
-             - Any emoji, any ASCII characters, any composition\n\
-             - No borders, no rules, no constraints\n\
-             - Build landscapes, patterns, abstract art, scenes, or anything inspiring\n\n\
-             SESSION THEME: \"{theme_name}\"\n\
-             {theme_desc}\n\n\
-             {actions_list}\n\n\
-             INSTRUCTIONS:\n\
-             1. Return a JSON array of 20-40 actions that build a complete, high-quality composition.\n\
-             2. Plan the piece carefully — each action should contribute meaningfully.\n\
-             3. Use the full canvas (x: 0..{max_x}, y: 0..{max_y}). Every cell is 2 columns wide.\n\
-             4. End the array with {{\"action\": \"done\"}} when the piece is complete.\n\
-             5. Absolutely NO profanity, threats, or abusive content.\n\
-             6. Return ONLY a raw JSON array. No markdown fences, no extra text.\n\n\
-             Example format:\n\
-             [{{\"action\": \"place_glyph\", \"x\": 12, \"y\": 5, \"glyph\": \"🌲\"}}, {{\"action\": \"done\"}}]",
-            w = self.width, h = self.height, max_x = max_x, max_y = max_y,
-            theme_name = self.theme_name, theme_desc = self.theme_desc,
-            actions_list = actions_list,
-        );
-
-        let usr = format!(
-            "Current canvas (blank):\n{state}\n\nCreate your complete composition as a JSON array of actions:"
-        );
-
-        (sys, usr)
     }
 
     fn build_tabula_composition(&self, state: &str) -> (String, String) {

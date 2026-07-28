@@ -121,3 +121,20 @@
 | | - Added `Garden::reset()` to clear canvas, reset turtle, pick new border pattern between pieces |
 | | - App is now fully resilient: logs malformed JSON, retries LLM, never crashes on bad output |
 | | - Ctrl+C cleanly exits from any phase (composition, animation, or admiring) |
+| | - Added periodic heartbeat logging during LLM wait (every 30s) so user knows it's working |
+
+---
+
+## opencode/big-pickle — Fifth Session (True Creative Freedom)
+
+| | |
+|---|---|
+| **Source** | opencode/big-pickle (via opencode on claude.ai) |
+| **Date** | 2026-07-28 |
+| **Changes** | Replaced action-constrained Creative Freedom with a truly open-ended prompt: |
+| | - Creative Freedom now sends a gentle, completely unrestricted invitation: "what would you want to create today and why?" |
+| | - LLM can respond with any ASCII/emoji art it imagines, with zero action-type constraints |
+| | - Added `Action::DisplayRawArt { lines }` variant to render raw multi-line art directly on the canvas |
+| | - Added `extract_code_block()` to parse fenced code blocks from the LLM's narrative response |
+| | - If nothing is created, we sit and stare at a blank terminal (as promised) |
+| | - Removed the old action-based `build_creative_composition` prompt entirely |

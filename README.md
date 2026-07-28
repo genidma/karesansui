@@ -7,18 +7,28 @@ An LLM (via any OpenAI-compatible API — NVIDIA NIM, OpenRouter, etc.) composes
 artwork in a single shot: 20-40 actions that create a full composition. The turtle (`🐢`)
 then animates each action step-by-step, bringing the artwork to life right in your terminal.
 
-**Every run starts in Creative Freedom mode** — the LLM has unlimited freedom over the
-full canvas using any emoji or ASCII glyph. You can also use `-t` to explore **20 themed
-styles** — from zen garden classics like *Three Mountain Sanzen* and *Moonlit Reef* to
-*Sacred Geometry Mandala*, **Tabula Rasa (Pure ASCII Muse)**, **Wild Zones (Unbound Serenity)**,
-and **Gridwright (The Deliberate Grid as Craft)**.
+**Every run starts in Creative Freedom mode** — the turtle asks the LLM a completely open-ended
+question: "What would you want to create today and why?" The LLM can respond with any ASCII art it
+imagines, using any emoji or character, with zero constraints. If it chooses not to create anything,
+we just sit and stare at a blank terminal. You can also use `-t` to explore **20 themed styles** — 
+from zen garden classics like *Three Mountain Sanzen* and *Moonlit Reef* to *Sacred Geometry Mandala*,
+**Tabula Rasa (Pure ASCII Muse)**, **Wild Zones (Unbound Serenity)**,
+and **Gridwright (The Deliberate Grid as Craft)**. These themes use the structured action system
+(rocks, raking, moss, etc.).
 
 ## How it works
 
-- On startup, the LLM is asked to compose a complete piece of ASCII art in one response.
+Creative Freedom mode:
+- The turtle asks the LLM a completely open-ended question: "What would you like to create today?"
+- The LLM responds with raw ASCII/emoji art in a fenced code block, plus a narrative explanation.
+- The artwork is rendered directly on the canvas — no action types, no constraints.
+- If the LLM chooses not to create, the canvas stays blank (and that's okay).
+
+Other themes (Tabula Rasa, Wild Zones, Classic):
+- The LLM is asked to compose a complete piece of ASCII art in one response.
 - The LLM (taking 1-3 minutes) returns a JSON array of 20-40 actions.
 - The turtle (`🐢`) animates each action sequentially with smooth `crossterm` rendering.
-- The final piece is displayed — admire for 15 seconds, then the app exits cleanly.
+- The final piece is displayed — admire for 15 seconds, then the next piece begins.
 - Use `-t` to pick a theme, `-d` for dry-run simulation, `--step` to approve actions one-by-one.
 - If network rate-limits (429) occur, the engine reads the `Retry-After` header and backs off.
 - Press `Ctrl+C` at any time for graceful shutdown.
@@ -72,7 +82,7 @@ cargo run -- --help
 
 Each run selects or assigns one of **21 themes**:
 
-- **Creative Freedom** ⭐ *(default)* — unlimited ASCII art across the full canvas with any emoji or ASCII characters, no borders, no rules
+- **Creative Freedom** ⭐ *(default)* — the turtle asks "what would you want to create today and why?" and the LLM responds with whatever ASCII art it imagines, with zero constraints. If it chooses not to create, we stare at a blank terminal.
 - **Moonlit Reef** — coral reef clusters with sweeping sand curves
 - **Dragon Tail Ripples** — flowing diagonal rake lines in an S-curve
 - **Three Mountain Sanzen** — classic triadic rock composition
