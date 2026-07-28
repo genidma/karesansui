@@ -257,6 +257,8 @@ pub struct Garden {
     pub ascii_theme: AsciiTheme,
     /// Layered glyph support for Matrix ASCII
     pub glyph_layers: HashMap<(usize, usize), Vec<LayeredGlyph>>,
+    /// Raw art lines for Creative Freedom display (bypasses grid)
+    pub raw_art_lines: Option<Vec<String>>,
 }
 
 impl Garden {
@@ -274,6 +276,7 @@ impl Garden {
             border_pattern,
             ascii_theme: AsciiTheme::Classic,
             glyph_layers: HashMap::new(),
+            raw_art_lines: None,
         }
     }
 
@@ -615,6 +618,9 @@ impl Garden {
     /// Render the garden to a string for terminal display, showing the turtle
     /// right at its current location.
     pub fn render(&self) -> String {
+        if let Some(ref lines) = self.raw_art_lines {
+            return lines.join("\n");
+        }
         let mut out = String::new();
         for (y, row) in self.grid.iter().enumerate() {
             for (x, cell) in row.iter().enumerate() {
@@ -632,6 +638,9 @@ impl Garden {
     }
 
     pub fn render_colored(&self, no_color: bool) -> String {
+        if self.raw_art_lines.is_some() {
+            return self.render();
+        }
         if no_color {
             return self.render();
         }
@@ -667,21 +676,21 @@ impl Garden {
     }
 
     /// Render the current garden state to screen with header.
+    /// Uses raw_art_lines when available (Creative Freedom mode), otherwise renders the garden grid.
     pub fn render_screen(&self, header: &str, no_color: bool) -> Result<()> {
         use crossterm::{cursor, terminal};
         use std::io::Write;
         let mut stdout = std::io::stdout();
-        crossterm::queue!(stdout, cursor::Hide, cursor::MoveTo(0, 0))?;
-        let full_text = if no_color {
-            format!("{header}\n\n{}", self.render())
+        crossterm::queue!(stdout, cursor::Hide, cursor::MoveTo(0, 0), terminal::Clear(terminal::ClearType::All))?;
+        let rendered = if let Some(ref lines) = self.raw_art_lines {
+            lines.join("\n")
+        } else if no_color {
+            self.render()
         } else {
-            format!("{header}\n\n{}", self.render_colored(false))
+            self.render_colored(false)
         };
-        for line in full_text.lines() {
-            crossterm::queue!(stdout, terminal::Clear(terminal::ClearType::UntilNewLine))?;
-            writeln!(stdout, "{line}")?;
-        }
-        crossterm::queue!(stdout, terminal::Clear(terminal::ClearType::FromCursorDown))?;
+        writeln!(stdout, "{header}\n")?;
+        writeln!(stdout, "{rendered}")?;
         stdout.flush()?;
         Ok(())
     }
@@ -694,6 +703,7 @@ impl Garden {
         use rand::Rng;
         self.border_pattern = BORDER_PATTERNS[rand::rng().random_range(0..BORDER_PATTERNS.len())].clone();
         self.glyph_layers.clear();
+        self.raw_art_lines = None;
     }
 
     /// Animate the turtle walking step-by-step to (dest_x, dest_y).
@@ -936,18 +946,7 @@ impl Garden {
                 tokio::time::sleep(Duration::from_millis(40)).await;
             }
             Action::DisplayRawArt { lines } => {
-                self.grid = vec![vec![EMPTY.to_string(); self.width]; self.height];
-                for (y, line) in lines.iter().enumerate() {
-                    if y >= self.height { break; }
-                    for (x, ch) in line.chars().enumerate() {
-                        if x >= self.width { break; }
-                        if !ch.is_whitespace() {
-                            let glyph: String = ch.to_string();
-                            self.place_glyph(x, y, &glyph);
-                        }
-                    }
-                    self.turtle_pos = Some((0, y.min(self.height.saturating_sub(1))));
-                }
+                self.raw_art_lines = Some(lines.clone());
                 self.render_screen(header, no_color)?;
             }
         }
