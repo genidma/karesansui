@@ -4,7 +4,7 @@
 
 `karesansui` (枯山水) is a tiny Rust CLI that slowly tends an ASCII & emoji zen garden,
 one action at a time — like watching a calm video game play itself. An LLM
-(through the OpenRouter free API) acts as the master gardener, deciding each move:
+(via any OpenAI-compatible API — OpenRouter, NVIDIA NIM, etc.) acts as the master gardener, deciding each move:
 draw a bamboo border (`🎋`), rake horizontal (`~~`) or circular (`◎ `) sand ripples,
 place stones (`🪨`, `🗿`), grow moss (`🌿`), lay gravel (`··`), add cherry blossom (`🌸`)
 and lantern (`🏮`) accents, or compose geometric mandalas (`⭕`, `◈ `, `✦ `, `☯ `, `❖ `).
@@ -19,12 +19,13 @@ from classic *Three Mountain Sanzen* and *Moonlit Reef* to *Sacred Geometry Mand
 
 ## How it works
 
-- A `Garden` grid holds 2-column wide strings so emoji and ASCII align cleanly: empty sand (`  `), raked lines (`~~`), circular concentric ripples (`◎ `), rocks (`🪨`, `🗿`, `🗻`), moss (`🌿`), gravel (`··`), flowers (`🌸`), lanterns (`🏮`), dynamic borders (`🎋`, `═╗`, `🌊`, `🌸`, `❖ `), mandala symbols (`⭕`, `◈ `, `✦ `, `☯ `, `❖ `), and pure ASCII glyphs (`# `, `/**`, `/\\`, `||`).
+- A `Garden` grid holds 2-column wide strings so emoji and ASCII align cleanly: empty sand (`  `), raked lines (`~~`), circular concentric ripples (Midpoint Circle algorithm — `◎ `), rocks (`🪨`, `🗿`, `🗻`), moss (`🌿`), gravel (`··`), flowers (`🌸`), lanterns (`🏮`), dynamic borders (`🎋`, `═╗`, `🌊`, `🌸`, `❖ `), mandala symbols (`⭕`, `◈ `, `✦ `, `☯ `, `❖ `), and pure ASCII glyphs (`# `, `/**`, `/\\`, `||`).
 - On startup, a **theme** is selected (or chosen by you via CLI/interactive menu) and injected into the LLM system prompt.
 - Every turn, the LLM inspects the exact visual state of the garden and returns a structured JSON action.
-- The turtle (`🐢` or `[*]`) animates step-by-step to the destination coordinates (`animate_walk`) and applies the change with smooth `crossterm` rendering.
+- The turtle (`🐢` or `[*]`) animates step-by-step to the destination coordinates and applies the change with smooth `crossterm` rendering.
 - To maintain serenity and respect free-tier API rate limits, normal moves space out every **6 seconds**, with a **30-second resting pause** after every 10 moves (or configured via `KARESANSUI_TICK_MS` / `KARESANSUI_REST_SECS`).
 - If network rate-limits (429) occur, the engine automatically attempts exponential backoff with retries before pausing.
+- Press `Ctrl+C` at any time for a graceful shutdown — the terminal is restored (cursor shown, screen cleared) before exit.
 - After **30 minutes of continuous contemplation**, the garden resets into a fresh session (or saves state to file if `--resume` is enabled).
 
 ## What will it make?
@@ -73,7 +74,7 @@ cargo run -- --help
 | `--interactive` | `-i` | `false` | Launch interactive theme/setting selection menu |
 | `--resume` | `-r` | `false` | Resume garden from saved state file across sessions |
 | `--state-file <PATH>`| | `karesansui_state.json` | Path to JSON state file for saving or resuming state |
-| `--dry-run` | `-d` | `false` | Offline simulation without making OpenRouter API calls |
+| `--dry-run` | `-d` | `false` | Offline simulation without making LLM API calls |
 | `--step` | `-s` | `false` | Single-step debug mode: run one action and exit cleanly |
 | `--snapshot <PATH>` | | `None` | Dump garden state/text to file on completion or step |
 | `--no-color` | | `false` | Disable faint crossterm coloring and use plain text output |
@@ -103,27 +104,46 @@ Each run selects or assigns one of **19 themes**:
 - **Wild Zones (Unbound Serenity)** *(✨ NEW)* — true liberation: all zen garden rules, raked sand, mandalas, and rigid borders are completely removed without any forced visual persona. Guided strictly by calm, peace, and serenity (zero profanity/threats/abuse), the LLM has absolute freedom across the open canvas (`place_glyph`, `draw_line`, `draw_ring`, `fill_box`, `clear_cell`) using any emoji or ASCII characters without influence from other themes
 - **Gridwright (The Deliberate Grid as Craft)** *(✨ NEW)* — pixel-perfect grid art where every cell is a deliberate choice. Uses precise geometric shapes (lines, circles, rectangles), runtime-selected palettes, and mathematical composition with no scaling, no smoothing, no interpolation—just pure, intentional placement on a clean grid. The LLM orchestrates pixel-by-pixel construction using explicit drawing actions (`SetPixel`, `DrawLine`, `DrawCircle`, `FillRectangle`) and color palette indices for controlled artistic expression.
 
-## Free models only — enforced
+## Providers & Models
 
-This project is built to **never spend a cent**. The gardener only ever calls
-models from a hardcoded `FREE_MODELS` allowlist in `src/llm.rs`
-(`tencent/hy3:free`, `google/gemma-4-31b-it:free`, and others). If
-`OPENROUTER_MODEL` names anything not on the list, it is rejected and falls
-back to the free default. There is no code path to a paid model.
+Two providers are supported out of the box:
+
+| Provider | Endpoint | Key prefix | Best for |
+|----------|----------|------------|----------|
+| **OpenRouter** | `https://openrouter.ai/api/v1/chat/completions` | `sk-or-...` | Free tier models, broad selection |
+| **NVIDIA NIM** | `https://integrate.api.nvidia.com/v1/chat/completions` | `nvapi-...` | Higher rate limits, faster inference |
+
+Any OpenAI-compatible API can be used by setting `LLM_API_URL` to the desired endpoint.
+
+**OpenRouter free model allowlist:** When using the default OpenRouter endpoint, the gardener restricts itself to a hardcoded `FREE_MODELS` list in `src/llm.rs` (`tencent/hy3:free`, `google/gemma-4-31b-it:free`, and others). Non-allowlisted models fall back to the default. This check is **bypassed** when using a custom `LLM_API_URL` (e.g. NVIDIA), giving you full model freedom.
 
 ## Setup
 
-1. Get a free key at <https://openrouter.ai/keys> (starts with `sk-or-...`).
+1. **Get an API key:**
+   - [OpenRouter](https://openrouter.ai/keys) (free tier, `sk-or-...`)
+   - [NVIDIA NIM](https://build.nvidia.com/) (free tier, `nvapi-...`)
 2. Create your local env file:
    ```bash
    cp .env.example .env
    ```
-   Then set `OPENROUTER_API_KEY=sk-or-...` in `.env`. (`.env` is gitignored.)
-3. Build locally or on your remote machine:
+3. Configure `.env` with your provider of choice:
+   ```bash
+   # For NVIDIA:
+   LLM_API_KEY=nvapi-...
+   LLM_API_URL=https://integrate.api.nvidia.com/v1/chat/completions
+   LLM_MODEL=nvidia/llama-3.1-nemotron-70b-instruct
+
+   # For OpenRouter:
+   LLM_API_KEY=sk-or-...
+   # LLM_API_URL defaults to OpenRouter
+   LLM_MODEL=tencent/hy3:free
+   ```
+   (`.env` is gitignored.)
+4. Build:
    ```bash
    cargo build
    ```
-4. Run:
+5. Run:
    ```bash
    cargo run
    ```
@@ -132,8 +152,11 @@ back to the free default. There is no code path to a paid model.
 
 | Env var | Default | Notes |
 |---------|---------|-------|
-| `OPENROUTER_API_KEY` | _(required)_ | Your free OpenRouter key. |
-| `OPENROUTER_MODEL` | `tencent/hy3:free` | Must be a `:free` slug on the allowlist. |
+| Env var | Default | Notes |
+|---------|---------|-------|
+| `LLM_API_KEY` | _(required)_ | API key (`nvapi-...`, `sk-or-...`, etc.). Also accepts legacy `OPENROUTER_API_KEY`. |
+| `LLM_API_URL` | `https://openrouter.ai/api/v1/chat/completions` | Any OpenAI-compatible chat completions endpoint. Also accepts legacy `OPENROUTER_URL`. |
+| `LLM_MODEL` | `tencent/hy3:free` | Model identifier. Also accepts legacy `OPENROUTER_MODEL`. |
 | `KARESANSUI_TICK_MS` | `6000` (`--pace` * 1000) | Milliseconds between normal moves (overrides `--pace`). |
 | `KARESANSUI_REST_SECS` | `30` (`--rest`) | Seconds to rest after every 10 moves (overrides `--rest`). |
 
@@ -141,14 +164,15 @@ In addition to `.env`, grid size (`--width`/`--height`), pacing (`--pace`), rate
 
 ## Layout
 
-- `src/garden.rs` — `Garden` grid, `GardenState` persistence (`serde`), `crossterm` colored rendering, `BorderPattern` (12 dynamic geometric/aesthetic border styles), `Action` enum (including `RakeRing` & `PlaceMandala`), turtle pathfinding, and 2-column glyph definitions.
-- `src/llm.rs` — OpenRouter client with exponential backoff & detailed JSON error logging, 20-theme pool, free-model enforcement, offline simulation (`--dry-run`), and liberated dynamic prompt engineering.
-- `src/main.rs` — CLI parser (`clap`), interactive terminal menu (`-i`), `crossterm` screen management (`CleanExit` guard), single-step debugging (`--step`), state persistence loop, and 30-minute session lifecycle.
-- `src/vec.rs` — Point geometry, line drawing (Bresenham algorithm), circle generation (Midpoint Circle), distance calculations, and filled rectangle primitives for pixel-precise grid placement.
-- `src/color.rs` — RGB color management, 6 pre-defined palettes (monochrome, zen_earth, night_sky, vibrant_neon, warm_earth, gridwright_default), color blending, and palette quantization.
-- `src/canvas.rs` — 2D pixel grid rendering with drawing primitives (lines, circles, rectangles), ANSI 24-bit RGB color output, and `CanvasBuilder` fluent composition API.
-- `src/pixel_art.rs` — `PixelArtAction` enum for LLM-driven pixel art (SetPixel, DrawLine, DrawCircle, FillRectangle, etc.), `GridwrightConfig` for composition tuning, and executor for applying actions to canvas.
-- `src/gridwright_runner.rs` — End-to-end LLM orchestration for Gridwright sessions: OpenRouter API integration, exponential backoff retry logic, canvas preview rendering, and dry-run simulation mode.
+- `src/openrouter.rs` — `LlmClient` shared HTTP client for OpenAI-compatible APIs. Configurable endpoint (`LLM_API_URL`), Bearer auth, exponential backoff with retries (4 attempts), and OpenRouter-specific header injection (`HTTP-Referer`, `X-Title`) only when the endpoint contains `openrouter.ai`.
+- `src/garden.rs` — `Garden` grid, `GardenState` persistence (`serde`), `crossterm` colored rendering, `BorderPattern` (12 dynamic border styles), `Action` enum (`RakeRing`, `PlaceMandala`, etc.), `execute_action()` dispatch for all action types with turtle animation, and 2-column glyph definitions.
+- `src/llm.rs` — LLM prompt engineer: 20-theme pool, `FREE_MODELS` allowlist (bypassed with custom `LLM_API_URL`), offline simulation (`--dry-run`), and dynamic prompt construction.
+- `src/main.rs` — CLI parser (`clap`), interactive terminal menu (`-i`), `crossterm` screen management (`CleanExit` guard), `Ctrl+C` graceful shutdown handler (`tokio::signal`), single-step debugging (`--step`), state persistence loop, and 30-minute session lifecycle.
+- `src/vec.rs` — `Point` geometry, line drawing (Bresenham), circle generation (Midpoint Circle algorithm), distance calculations, and filled rectangle primitives.
+- `src/color.rs` — RGB color management, 5 pre-defined palettes (monochrome, zen_earth, night_sky, vibrant_neon, warm_earth), palette quantization.
+- `src/canvas.rs` — 2D pixel grid with drawing primitives (lines, circles, rectangles) and ANSI 24-bit RGB color output.
+- `src/pixel_art.rs` — `PixelArtAction` enum for LLM-driven pixel art, `GridwrightConfig`, and action executor.
+- `src/gridwright_runner.rs` — End-to-end LLM orchestration for Gridwright pixel art sessions.
 
 ## Credits
 
@@ -173,3 +197,4 @@ In addition to `.env`, grid size (`--width`/`--height`), pacing (`--pace`), rate
   - Designed **gridwright_runner.rs** (end-to-end session orchestration via OpenRouter, exponential backoff retry logic, canvas preview rendering, dry-run simulation)
   - Philosophy: pixel-perfect grid art where every cell is deliberate, no auto-scaling or smoothing—just pure mathematical composition under LLM control
 - Fixed & Unified by **opencode/big-pickle**: Resolved compilation errors introduced by a `git stash pop` merge conflict — removed stray `}` delimiter, deduplicated two `impl Garden` blocks (placeholder stubs vs real implementations) into a single clean block, fixed move-after-use on `LayeredGlyph`, added exhaustive match arms for the 4 new `Action` variants (`PlaceMultiCellGlyph`, `DrawFlowLine`, `ApplyGlitchFilter`, `PlaceBlendedGlyph`), and fixed `usize` dereference errors in `main.rs`.
+- Refactored & Multi-Provider by **opencode/big-pickle**: Extracted shared `LlmClient` from duplicate HTTP logic in `llm.rs` and `gridwright_runner.rs` into `src/openrouter.rs`. Replaced the ~240-line action dispatch match block in `main.rs` with `Garden::execute_action()` (dropping main.rs from 638 → 388 lines). Replaced trig-based `ring_points` with integer-only Midpoint Circle. Added graceful `Ctrl+C` shutdown handler. Removed ~150 lines of dead code across `canvas.rs`, `color.rs`, `garden.rs`, and `vec.rs`. Made the LLM provider configurable (`LLM_API_KEY`, `LLM_API_URL`, `LLM_MODEL`) so the garden can run against **NVIDIA NIM**, OpenRouter, or any OpenAI-compatible API.
