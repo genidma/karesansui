@@ -66,6 +66,9 @@ pub enum Action {
         blend_mode: BlendMode,
         opacity: f32,
     },
+    /// Display raw ASCII art lines from the LLM's own creation (Creative Freedom v2)
+    #[serde(skip)]
+    DisplayRawArt { lines: Vec<String> },
 }
 
 pub const EMPTY: &str = "  ";
@@ -931,6 +934,21 @@ impl Garden {
                 self.turtle_pos = Some((*x, *y));
                 self.render_screen(header, no_color)?;
                 tokio::time::sleep(Duration::from_millis(40)).await;
+            }
+            Action::DisplayRawArt { lines } => {
+                self.grid = vec![vec![EMPTY.to_string(); self.width]; self.height];
+                for (y, line) in lines.iter().enumerate() {
+                    if y >= self.height { break; }
+                    for (x, ch) in line.chars().enumerate() {
+                        if x >= self.width { break; }
+                        if !ch.is_whitespace() {
+                            let glyph: String = ch.to_string();
+                            self.place_glyph(x, y, &glyph);
+                        }
+                    }
+                    self.turtle_pos = Some((0, y.min(self.height.saturating_sub(1))));
+                }
+                self.render_screen(header, no_color)?;
             }
         }
         Ok(false)
