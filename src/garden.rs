@@ -1,5 +1,7 @@
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Duration;
 
 /// A single gardener action returned by the LLM.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,31 +107,6 @@ impl AsciiTheme {
         }
     }
 
-    pub fn allow_overlapping(&self) -> bool {
-        match self {
-            AsciiTheme::Classic => false,
-            AsciiTheme::TabulaRasa => true,
-            AsciiTheme::WildZones => true,
-            AsciiTheme::EnhancedTabulaRasa => true,
-            AsciiTheme::ChaoticASCII => true,
-            AsciiTheme::MatrixASCII => true,
-            AsciiTheme::GlitchASCII => true,
-            AsciiTheme::Gridwright => false,
-        }
-    }
-
-    pub fn restrict_to_ascii_only(&self) -> bool {
-        match self {
-            AsciiTheme::Classic => true,
-            AsciiTheme::TabulaRasa => true,
-            AsciiTheme::WildZones => false,
-            AsciiTheme::EnhancedTabulaRasa => true,
-            AsciiTheme::ChaoticASCII => false,
-            AsciiTheme::MatrixASCII => false,
-            AsciiTheme::GlitchASCII => false,
-            AsciiTheme::Gridwright => false,
-        }
-    }
 }
 
 /// Blend modes for Matrix ASCII overlapping glyphs
@@ -327,12 +304,6 @@ impl Garden {
         }
     }
 
-    /// Set the ASCII theme for rendering
-    pub fn set_ascii_theme(&mut self, theme: AsciiTheme) {
-        self.ascii_theme = theme;
-        self.glyph_layers.clear();
-    }
-
     /// Place a glyph using theme-aware rendering
     pub fn place_glyph(&mut self, x: usize, y: usize, glyph: &str) {
         if y >= self.height || x >= self.width {
@@ -418,15 +389,6 @@ impl Garden {
         result
     }
 
-    pub fn get_composite_glyph(&self, x: usize, y: usize) -> String {
-        if let Some(layers) = self.glyph_layers.get(&(x, y)) {
-            if let Some(layer) = layers.last() {
-                return layer.content.clone();
-            }
-        }
-        self.grid[y][x].clone()
-    }
-
     pub fn is_empty(&self, x: usize, y: usize) -> bool {
         self.grid[y][x] == EMPTY
     }
@@ -492,22 +454,18 @@ impl Garden {
     }
 
     pub fn ring_points(&self, cx: usize, cy: usize, radius: usize) -> Vec<(usize, usize)> {
-        let mut points = Vec::new();
-        let r = radius as f64;
-        for deg in (0..360).step_by(10) {
-            let rad = (deg as f64).to_radians();
-            let dx = (r * rad.cos()).round() as isize;
-            let dy = (r * rad.sin()).round() as isize;
-            let px = cx as isize + dx;
-            let py = cy as isize + dy;
-            if px >= 1 && px < (self.width.saturating_sub(1)) as isize && py >= 1 && py < (self.height.saturating_sub(1)) as isize {
-                let pt = (px as usize, py as usize);
-                if !points.contains(&pt) {
-                    points.push(pt);
-                }
-            }
-        }
-        points
+        let center = crate::vec::Point::new(cx, cy);
+        center
+            .circle_points(radius)
+            .into_iter()
+            .filter(|p| {
+                p.x >= 1
+                    && p.x < self.width.saturating_sub(1)
+                    && p.y >= 1
+                    && p.y < self.height.saturating_sub(1)
+            })
+            .map(|p| (p.x, p.y))
+            .collect()
     }
 
     #[allow(dead_code)]
@@ -776,5 +734,268 @@ impl Garden {
             glyph_layers: HashMap::new(),
         };
         Ok((garden, state.prompt_count, state.theme_name))
+    }
+
+    /// Render the current garden state to screen with header.
+    pub fn render_screen(&self, header: &str, no_color: bool) -> Result<()> {
+        use crossterm::{cursor, terminal};
+        use std::io::Write;
+        let mut stdout = std::io::stdout();
+        crossterm::queue!(stdout, cursor::Hide, cursor::MoveTo(0, 0))?;
+        let full_text = if no_color {
+            format!("{header}\n\n{}", self.render())
+        } else {
+            format!("{header}\n\n{}", self.render_colored(false))
+        };
+        for line in full_text.lines() {
+            crossterm::queue!(stdout, terminal::Clear(terminal::ClearType::UntilNewLine))?;
+            writeln!(stdout, "{line}")?;
+        }
+        crossterm::queue!(stdout, terminal::Clear(terminal::ClearType::FromCursorDown))?;
+        stdout.flush()?;
+        Ok(())
+    }
+
+    /// Animate the turtle walking step-by-step to (dest_x, dest_y).
+    pub async fn animate_walk(&mut self, dest_x: usize, dest_y: usize, header: &str, no_color: bool) -> Result<()> {
+        let (mut tx, mut ty) = self.turtle_pos.unwrap_or((1, 1));
+        while tx != dest_x || ty != dest_y {
+            if tx < dest_x {
+                tx += 1;
+            } else if tx > dest_x {
+                tx -= 1;
+            }
+            if ty < dest_y {
+                ty += 1;
+            } else if ty > dest_y {
+                ty -= 1;
+            }
+            self.turtle_pos = Some((tx, ty));
+            self.render_screen(header, no_color)?;
+            tokio::time::sleep(Duration::from_millis(150)).await;
+        }
+        Ok(())
+    }
+
+    /// Execute an action with full animation and rendering. Returns true if action was Done.
+    pub async fn execute_action(&mut self, action: &Action, header: &str, no_color: bool) -> Result<bool> {
+        let w = self.width;
+        let h = self.height;
+        match action {
+            Action::DrawBorder => {
+                for x in 0..w {
+                    self.draw_border_at(x, 0);
+                    self.turtle_pos = Some((x, 0));
+                    self.render_screen(header, no_color)?;
+                    tokio::time::sleep(Duration::from_millis(30)).await;
+                }
+                for y in 0..h {
+                    self.draw_border_at(w - 1, y);
+                    self.turtle_pos = Some((w - 1, y));
+                    self.render_screen(header, no_color)?;
+                    tokio::time::sleep(Duration::from_millis(30)).await;
+                }
+                for x in (0..w).rev() {
+                    self.draw_border_at(x, h - 1);
+                    self.turtle_pos = Some((x, h - 1));
+                    self.render_screen(header, no_color)?;
+                    tokio::time::sleep(Duration::from_millis(30)).await;
+                }
+                for y in (0..h).rev() {
+                    self.draw_border_at(0, y);
+                    self.turtle_pos = Some((0, y));
+                    self.render_screen(header, no_color)?;
+                    tokio::time::sleep(Duration::from_millis(30)).await;
+                }
+                self.turtle_pos = Some((1, 1));
+            }
+            Action::PlaceRock { x, y, size } => {
+                self.animate_walk(*x, *y, header, no_color).await?;
+                self.place_rock(*x, *y, *size);
+                self.render_screen(header, no_color)?;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            Action::PlaceMoss { x, y } => {
+                self.animate_walk(*x, *y, header, no_color).await?;
+                self.place_moss(*x, *y);
+                self.render_screen(header, no_color)?;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            Action::PlaceFlower { x, y } => {
+                self.animate_walk(*x, *y, header, no_color).await?;
+                self.place_flower(*x, *y);
+                self.render_screen(header, no_color)?;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            Action::PlaceLantern { x, y } => {
+                self.animate_walk(*x, *y, header, no_color).await?;
+                self.place_lantern(*x, *y);
+                self.render_screen(header, no_color)?;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            Action::PlaceMandala { x, y, style } => {
+                self.animate_walk(*x, *y, header, no_color).await?;
+                self.place_mandala(*x, *y, *style);
+                self.render_screen(header, no_color)?;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            Action::PlaceAscii { x, y, glyph } => {
+                self.animate_walk(*x, *y, header, no_color).await?;
+                self.place_ascii(*x, *y, glyph);
+                self.render_screen(header, no_color)?;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            Action::DrawAsciiLine { y, x1, x2, glyph } => {
+                self.animate_walk(*x1, *y, header, no_color).await?;
+                let (a, b) = if x1 <= x2 { (*x1, *x2) } else { (*x2, *x1) };
+                let step_range: Vec<usize> = if x1 <= x2 {
+                    (a..=b.min(w.saturating_sub(1))).collect()
+                } else {
+                    (a..=b.min(w.saturating_sub(1))).rev().collect()
+                };
+                for x in step_range {
+                    self.turtle_pos = Some((x, *y));
+                    self.place_ascii(x, *y, glyph);
+                    self.render_screen(header, no_color)?;
+                    tokio::time::sleep(Duration::from_millis(120)).await;
+                }
+            }
+            Action::PlaceGlyph { x, y, glyph } => {
+                self.animate_walk(*x, *y, header, no_color).await?;
+                self.place_glyph(*x, *y, glyph);
+                self.render_screen(header, no_color)?;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            Action::DrawLine { y, x1, x2, glyph } => {
+                self.animate_walk(*x1, *y, header, no_color).await?;
+                let (a, b) = if x1 <= x2 { (*x1, *x2) } else { (*x2, *x1) };
+                let step_range: Vec<usize> = if x1 <= x2 {
+                    (a..=b.min(w.saturating_sub(1))).collect()
+                } else {
+                    (a..=b.min(w.saturating_sub(1))).rev().collect()
+                };
+                for x in step_range {
+                    self.turtle_pos = Some((x, *y));
+                    self.place_glyph(x, *y, glyph);
+                    self.render_screen(header, no_color)?;
+                    tokio::time::sleep(Duration::from_millis(120)).await;
+                }
+            }
+            Action::DrawRing { cx, cy, radius, glyph } => {
+                let pts = self.ring_points(*cx, *cy, *radius);
+                if let Some(&(fx, fy)) = pts.first() {
+                    self.animate_walk(fx, fy, header, no_color).await?;
+                }
+                for (x, y) in pts {
+                    self.turtle_pos = Some((x, y));
+                    self.place_glyph(x, y, glyph);
+                    self.render_screen(header, no_color)?;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+            Action::FillBox { x1, y1, x2, y2, glyph } => {
+                let (min_x, max_x) = if x1 <= x2 { (*x1, *x2) } else { (*x2, *x1) };
+                let (min_y, max_y) = if y1 <= y2 { (*y1, *y2) } else { (*y2, *y1) };
+                self.animate_walk(min_x, min_y, header, no_color).await?;
+                for y in min_y..=max_y.min(h.saturating_sub(1)) {
+                    for x in min_x..=max_x.min(w.saturating_sub(1)) {
+                        self.turtle_pos = Some((x, y));
+                        self.place_glyph(x, y, glyph);
+                        self.render_screen(header, no_color)?;
+                        tokio::time::sleep(Duration::from_millis(60)).await;
+                    }
+                }
+            }
+            Action::ClearCell { x, y } => {
+                self.animate_walk(*x, *y, header, no_color).await?;
+                self.clear_cell(*x, *y);
+                self.render_screen(header, no_color)?;
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+            Action::RakeLine { y, x1, x2 } => {
+                self.animate_walk(*x1, *y, header, no_color).await?;
+                let (a, b) = if x1 <= x2 { (*x1, *x2) } else { (*x2, *x1) };
+                let step_range: Vec<usize> = if x1 <= x2 {
+                    (a..=b.min(w.saturating_sub(1))).collect()
+                } else {
+                    (a..=b.min(w.saturating_sub(1))).rev().collect()
+                };
+                for x in step_range {
+                    self.turtle_pos = Some((x, *y));
+                    if self.is_empty(x, *y) {
+                        self.grid[*y][x] = RAKED.to_string();
+                    }
+                    self.render_screen(header, no_color)?;
+                    tokio::time::sleep(Duration::from_millis(120)).await;
+                }
+            }
+            Action::RakeRing { cx, cy, radius } => {
+                let pts = self.ring_points(*cx, *cy, *radius);
+                if let Some(first) = pts.first() {
+                    self.animate_walk(first.0, first.1, header, no_color).await?;
+                }
+                for (x, y) in pts {
+                    self.turtle_pos = Some((x, y));
+                    if self.is_empty(x, y) {
+                        self.grid[y][x] = RAKED.to_string();
+                    }
+                    self.render_screen(header, no_color)?;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+            Action::PlaceGravel { y, x1, x2 } => {
+                self.animate_walk(*x1, *y, header, no_color).await?;
+                let (a, b) = if x1 <= x2 { (*x1, *x2) } else { (*x2, *x1) };
+                let step_range: Vec<usize> = if x1 <= x2 {
+                    (a..=b.min(w.saturating_sub(1))).collect()
+                } else {
+                    (a..=b.min(w.saturating_sub(1))).rev().collect()
+                };
+                for x in step_range {
+                    self.turtle_pos = Some((x, *y));
+                    if self.is_empty(x, *y) {
+                        self.grid[*y][x] = GRAVEL.to_string();
+                    }
+                    self.render_screen(header, no_color)?;
+                    tokio::time::sleep(Duration::from_millis(120)).await;
+                }
+            }
+            Action::Done => {
+                return Ok(true);
+            }
+            Action::PlaceMultiCellGlyph { anchor_x, anchor_y, glyphs } => {
+                for (dx, dy, glyph) in glyphs {
+                    let x = anchor_x.saturating_add(*dx);
+                    let y = anchor_y.saturating_add(*dy);
+                    self.place_glyph(x, y, glyph);
+                }
+                self.turtle_pos = Some((*anchor_x, *anchor_y));
+                self.render_screen(header, no_color)?;
+                tokio::time::sleep(Duration::from_millis(60)).await;
+            }
+            Action::DrawFlowLine { points, glyph } => {
+                for (x, y) in points {
+                    self.place_glyph(*x, *y, glyph);
+                    self.turtle_pos = Some((*x, *y));
+                    self.render_screen(header, no_color)?;
+                    tokio::time::sleep(Duration::from_millis(30)).await;
+                }
+            }
+            Action::ApplyGlitchFilter { x, y, .. } => {
+                let cell = self.grid[*y][*x].clone();
+                let corrupted = format!("?{}", cell.chars().next().unwrap_or(' '));
+                self.place_glyph(*x, *y, &corrupted);
+                self.turtle_pos = Some((*x, *y));
+                self.render_screen(header, no_color)?;
+                tokio::time::sleep(Duration::from_millis(40)).await;
+            }
+            Action::PlaceBlendedGlyph { x, y, glyph, .. } => {
+                self.place_glyph(*x, *y, glyph);
+                self.turtle_pos = Some((*x, *y));
+                self.render_screen(header, no_color)?;
+                tokio::time::sleep(Duration::from_millis(40)).await;
+            }
+        }
+        Ok(false)
     }
 }

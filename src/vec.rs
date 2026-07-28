@@ -16,6 +16,7 @@ impl Point {
     }
 
     /// Manhattan distance between two points.
+    #[cfg(test)]
     pub fn manhattan_distance(&self, other: Point) -> usize {
         ((self.x as isize - other.x as isize).abs() + (self.y as isize - other.y as isize).abs())
             as usize
@@ -139,10 +140,6 @@ impl Point {
         points
     }
 
-    /// Clamp this point to fit within grid bounds.
-    pub fn clamp(&self, width: usize, height: usize) -> Point {
-        Point::new(self.x.min(width.saturating_sub(1)), self.y.min(height.saturating_sub(1)))
-    }
 }
 
 impl Add for Point {

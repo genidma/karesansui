@@ -1,42 +1,13 @@
-/// Gridwright Runner: Full integration for pixel-art LLM generation with canvas system.
-/// This runner orchestrates the Gridwright theme end-to-end using OpenRouter LLM calls
-/// and the canvas/color/vec modules for precise, mathematical pixel composition.
-
 use crate::canvas::Canvas;
 use crate::color::{palettes, Palette};
+use crate::openrouter::LlmClient;
 use crate::pixel_art::{GridwrightConfig, PixelArtAction, PixelArtExecutor};
-use anyhow::Result;
-use rand::seq::IndexedRandom;
-use reqwest;
-use serde::Deserialize;
-use serde_json::json;
+use anyhow::{Context, Result};
 use std::time::Duration;
-
-const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct ORResponse {
-    choices: Vec<Choice>,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct Choice {
-    message: ChatMessageOut,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct ChatMessageOut {
-    content: String,
-}
 
 /// GridwrightRunner orchestrates pixel art generation via LLM.
 pub struct GridwrightRunner {
-    client: reqwest::Client,
-    api_key: String,
-    model: String,
+    client: Option<LlmClient>,
     config: GridwrightConfig,
     dry_run: bool,
     pace: Duration,
@@ -52,10 +23,13 @@ impl GridwrightRunner {
         config: GridwrightConfig,
         dry_run: bool,
     ) -> Self {
+        let client = if dry_run {
+            None
+        } else {
+            Some(LlmClient::new(api_key, model))
+        };
         GridwrightRunner {
-            client: reqwest::Client::new(),
-            api_key,
-            model,
+            client,
             config,
             dry_run,
             pace: Duration::from_millis(1500),
@@ -121,7 +95,6 @@ impl GridwrightRunner {
 
         canvas.set_palette(&self.config.palette);
 
-        // Initial screen render
         let header = format!(
             "🎨 Gridwright — Subject: \"{}\" | Palette: \"{}\"  [initializing...]",
             self.config.subject,
@@ -225,93 +198,12 @@ impl GridwrightRunner {
             return self.simulate_action();
         }
 
-        let body = json!({
-            "model": self.model,
-            "messages": [
-                { "role": "system", "content": system_prompt },
-                { "role": "user", "content": user_prompt }
-            ],
-            "temperature": 0.7,
-        });
+        let client = self.client.as_ref().unwrap();
+        let content = client.call_raw(&system_prompt, &user_prompt, 0.7, "karesansui-gridwright").await?;
 
-        let mut backoff = Duration::from_millis(1000);
-        let max_attempts = 4;
-
-        for attempt in 1..=max_attempts {
-            let resp_result = self
-                .client
-                .post(OPENROUTER_URL)
-                .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("Content-Type", "application/json")
-                .header("HTTP-Referer", "https://github.com/karesansui")
-                .header("X-Title", "karesansui-gridwright")
-                .json(&body)
-                .send()
-                .await;
-
-            let resp = match resp_result {
-                Ok(r) => r,
-                Err(e) => {
-                    if attempt < max_attempts {
-                        log::warn!(
-                            "Network error (attempt {}/{}): {}. Retrying in {:?}...",
-                            attempt, max_attempts, e, backoff
-                        );
-                        tokio::time::sleep(backoff).await;
-                        backoff *= 2;
-                        continue;
-                    } else {
-                        return Err(anyhow::anyhow!(
-                            "Network error after {} attempts: {}",
-                            max_attempts,
-                            e
-                        ));
-                    }
-                }
-            };
-
-            let status = resp.status();
-            if !status.is_success() {
-                let err_body = resp.text().await.unwrap_or_default();
-                if (status == reqwest::StatusCode::TOO_MANY_REQUESTS
-                    || status.is_server_error()
-                    || status == reqwest::StatusCode::BAD_REQUEST)
-                    && attempt < max_attempts
-                {
-                    log::warn!(
-                        "API error {status} (attempt {}/{max_attempts}): {err_body}. Retrying...",
-                        attempt, max_attempts = max_attempts
-                    );
-                    tokio::time::sleep(backoff).await;
-                    backoff *= 2;
-                    continue;
-                } else {
-                    return Err(anyhow::anyhow!("API error {status}: {err_body}"));
-                }
-            }
-
-            let or_resp: ORResponse = resp.json().await?;
-            let content = or_resp
-                .choices
-                .first()
-                .map(|c| c.message.content.clone())
-                .ok_or_else(|| anyhow::anyhow!("No choices in response"))?;
-
-            let clean = content
-                .trim()
-                .strip_prefix("```json")
-                .unwrap_or(content.trim())
-                .strip_prefix("```")
-                .unwrap_or(content.trim())
-                .strip_suffix("```")
-                .unwrap_or(content.trim())
-                .trim();
-
-            let action: PixelArtAction = serde_json::from_str(clean)?;
-            return Ok(action);
-        }
-
-        Err(anyhow::anyhow!("Exceeded max retry attempts"))
+        let action: PixelArtAction = serde_json::from_str(&content)
+            .with_context(|| format!("failed to parse Gridwright action: '{content}'"))?;
+        Ok(action)
     }
 
     /// Render a compact preview of the canvas for the LLM.
@@ -325,7 +217,6 @@ impl GridwrightRunner {
             canvas.palette.as_deref().unwrap_or("none")
         ));
 
-        // Show a downsampled version if canvas is large
         if canvas.width > 32 || canvas.height > 16 {
             preview.push_str("(Downsampled view)\n");
             for y in (0..canvas.height).step_by(2) {
@@ -373,6 +264,7 @@ impl GridwrightRunner {
     /// Simulate an action for dry-run mode.
     fn simulate_action(&self) -> Result<PixelArtAction> {
         use rand::Rng;
+        use rand::seq::IndexedRandom;
         let mut rng = rand::rng();
         let max_x = self.config.width.saturating_sub(1);
         let max_y = self.config.height.saturating_sub(1);
@@ -452,7 +344,7 @@ mod tests {
             "test_key".to_string(),
             "test_model".to_string(),
             config,
-            true, // dry_run
+            true,
         );
 
         assert_eq!(runner.config.width, 32);

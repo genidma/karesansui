@@ -469,7 +469,7 @@ mod tests {
     #[test]
     fn test_draw_path_action() {
         let mut canvas = Canvas::new(20, 20);
-        let palette = palettes::gridwright_default();
+        let palette = palettes::gridwright_spec();
 
         let action = PixelArtAction::DrawPath {
             points: vec![(1, 1), (3, 2), (5, 1)],
@@ -504,7 +504,7 @@ mod tests {
     #[test]
     fn test_pixel_art_executor() {
         let mut canvas = Canvas::new(20, 20);
-        let palette = palettes::gridwright_default();
+        let palette = palettes::gridwright_spec();
 
         let action = PixelArtAction::SetPixel {
             x: 10,
@@ -521,7 +521,7 @@ mod tests {
     #[test]
     fn test_draw_rectangle_action() {
         let mut canvas = Canvas::new(20, 20);
-        let palette = palettes::gridwright_default();
+        let palette = palettes::gridwright_spec();
 
         let action = PixelArtAction::DrawRectangle {
             x1: 2,

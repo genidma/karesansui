@@ -28,40 +28,6 @@ impl Color {
         Some(Color::new(r, g, b))
     }
 
-    /// Convert to hex string (e.g., "#FF00FF").
-    pub fn to_hex(&self) -> String {
-        format!("#{:02X}{:02X}{:02X}", self.r, self.g, self.b)
-    }
-
-    /// Perceptual distance between two colors in RGB space (Euclidean).
-    pub fn distance(&self, other: Color) -> f64 {
-        let dr = (self.r as f64 - other.r as f64).powi(2);
-        let dg = (self.g as f64 - other.g as f64).powi(2);
-        let db = (self.b as f64 - other.b as f64).powi(2);
-        (dr + dg + db).sqrt()
-    }
-
-    /// Blend two colors with a factor (0.0 = self, 1.0 = other).
-    pub fn blend(&self, other: Color, factor: f64) -> Color {
-        let factor = factor.clamp(0.0, 1.0);
-        let r = (self.r as f64 * (1.0 - factor) + other.r as f64 * factor) as u8;
-        let g = (self.g as f64 * (1.0 - factor) + other.g as f64 * factor) as u8;
-        let b = (self.b as f64 * (1.0 - factor) + other.b as f64 * factor) as u8;
-        Color::new(r, g, b)
-    }
-
-    /// Find the closest color in a palette.
-    pub fn nearest_in_palette(&self, palette: &[Color]) -> Color {
-        palette
-            .iter()
-            .min_by(|a, b| {
-                self.distance(**a)
-                    .partial_cmp(&self.distance(**b))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .copied()
-            .unwrap_or(Color::new(0, 0, 0))
-    }
 }
 
 /// A color palette: a set of deliberate, named colors for a theme.
@@ -72,13 +38,6 @@ pub struct Palette {
 }
 
 impl Palette {
-    pub fn new(name: impl Into<String>) -> Self {
-        Palette {
-            name: name.into(),
-            colors: vec![],
-        }
-    }
-
     pub fn with_colors(name: impl Into<String>, colors: Vec<Color>) -> Self {
         Palette {
             name: name.into(),
@@ -86,20 +45,8 @@ impl Palette {
         }
     }
 
-    pub fn add_color(&mut self, color: Color) {
-        self.colors.push(color);
-    }
-
     pub fn get(&self, index: usize) -> Option<Color> {
         self.colors.get(index).copied()
-    }
-
-    pub fn len(&self) -> usize {
-        self.colors.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.colors.is_empty()
     }
 }
 
@@ -191,10 +138,6 @@ pub mod palettes {
         )
     }
 
-    /// Backward-compatible alias for the Gridwright palette.
-    pub fn gridwright_default() -> Palette {
-        gridwright_spec()
-    }
 }
 
 #[cfg(test)]
@@ -209,38 +152,4 @@ mod tests {
         assert_eq!(c.b, 255);
     }
 
-    #[test]
-    fn test_color_to_hex() {
-        let c = Color::new(255, 0, 255);
-        assert_eq!(c.to_hex(), "#FF00FF");
-    }
-
-    #[test]
-    fn test_color_distance() {
-        let c1 = Color::new(0, 0, 0);
-        let c2 = Color::new(255, 0, 0);
-        let d = c1.distance(c2);
-        assert!((d - 255.0).abs() < 0.1);
-    }
-
-    #[test]
-    fn test_nearest_in_palette() {
-        let palette = vec![
-            Color::new(0, 0, 0),
-            Color::new(255, 0, 0),
-            Color::new(0, 255, 0),
-        ];
-        let target = Color::new(250, 5, 0);
-        let nearest = target.nearest_in_palette(&palette);
-        assert_eq!(nearest, Color::new(255, 0, 0));
-    }
-
-    #[test]
-    fn test_palette_operations() {
-        let mut p = Palette::new("Test");
-        assert_eq!(p.len(), 0);
-        p.add_color(Color::new(255, 0, 0));
-        assert_eq!(p.len(), 1);
-        assert_eq!(p.get(0), Some(Color::new(255, 0, 0)));
-    }
 }

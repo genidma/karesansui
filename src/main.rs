@@ -3,18 +3,32 @@ mod color;
 mod garden;
 mod gridwright_runner;
 mod llm;
+mod openrouter;
 mod pixel_art;
 mod vec;
 
 use std::io::BufRead;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use clap::Parser;
-use garden::{Action, Garden, GRAVEL, RAKED};
+use garden::{Action, Garden};
 use gridwright_runner::GridwrightRunner;
 use llm::{Gardener, THEMES};
 use pixel_art::GridwrightConfig;
+use tokio::signal;
+
+fn restore_terminal() {
+    use crossterm::{cursor, terminal};
+    let _ = crossterm::execute!(
+        std::io::stdout(),
+        cursor::Show,
+        terminal::Clear(terminal::ClearType::All),
+        cursor::MoveTo(0, 0),
+    );
+}
 
 /// Session duration: 30 minutes per garden before automatic reset.
 const SESSION_DURATION: Duration = Duration::from_secs(30 * 60);
@@ -70,48 +84,6 @@ pub struct CliArgs {
     /// Disable faint crossterm coloring and use plain text output
     #[arg(long, default_value_t = false)]
     pub no_color: bool,
-}
-
-fn render_screen(header: &str, garden: &Garden, no_color: bool) -> Result<()> {
-    use crossterm::{cursor, terminal};
-    use std::io::Write;
-    let mut stdout = std::io::stdout();
-    crossterm::queue!(stdout, cursor::Hide, cursor::MoveTo(0, 0))?;
-    let full_text = format!("{header}\n\n{}", garden.render_colored(no_color));
-    for line in full_text.lines() {
-        crossterm::queue!(stdout, terminal::Clear(terminal::ClearType::UntilNewLine))?;
-        writeln!(stdout, "{line}")?;
-    }
-    crossterm::queue!(stdout, terminal::Clear(terminal::ClearType::FromCursorDown))?;
-    stdout.flush()?;
-    Ok(())
-}
-
-/// Helper: animate the turtle walking across the garden to (dest_x, dest_y).
-async fn animate_walk(
-    garden: &mut Garden,
-    dest_x: usize,
-    dest_y: usize,
-    header: &str,
-    no_color: bool,
-) -> Result<()> {
-    let (mut tx, mut ty) = garden.turtle_pos.unwrap_or((1, 1));
-    while tx != dest_x || ty != dest_y {
-        if tx < dest_x {
-            tx += 1;
-        } else if tx > dest_x {
-            tx -= 1;
-        }
-        if ty < dest_y {
-            ty += 1;
-        } else if ty > dest_y {
-            ty -= 1;
-        }
-        garden.turtle_pos = Some((tx, ty));
-        render_screen(header, garden, no_color)?;
-        tokio::time::sleep(Duration::from_millis(150)).await;
-    }
-    Ok(())
 }
 
 /// Present a clean interactive menu for picking theme and settings.
@@ -232,6 +204,15 @@ async fn main() -> Result<()> {
         Duration::from_secs(args.rest)
     };
 
+    let shutdown = Arc::new(AtomicBool::new(false));
+    {
+        let shutdown_signal = shutdown.clone();
+        tokio::spawn(async move {
+            signal::ctrl_c().await.ok();
+            shutdown_signal.store(true, Ordering::SeqCst);
+        });
+    }
+
     loop {
         let session_start = Instant::now();
         let (mut garden, mut prompt_count, theme_name, is_resumed) = if args.resume {
@@ -314,8 +295,16 @@ async fn main() -> Result<()> {
             }
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
+        if shutdown.load(Ordering::SeqCst) {
+            restore_terminal();
+            println!("🌿 karesansui — Interrupted. See you next time!");
+            return Ok(());
+        }
 
         while session_start.elapsed() < SESSION_DURATION {
+            if shutdown.load(Ordering::SeqCst) {
+                break;
+            }
             let state = garden.render();
             let header = if is_tabula {
                 format!("✨ Tabula Rasa — Theme: \"{theme}\"  [prompt #{prompt_count}]")
@@ -324,7 +313,7 @@ async fn main() -> Result<()> {
             } else {
                 format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  [prompt #{prompt_count}]")
             };
-            render_screen(&header, &garden, args.no_color)?;
+            garden.render_screen(&header, args.no_color)?;
 
             let action = match gardener
                 .next_action(&state, border_drawn, prompt_count, &recent_actions)
@@ -362,233 +351,26 @@ async fn main() -> Result<()> {
                 format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  [prompt #{prompt_count} — 🐢 building...]")
             };
 
-            match action {
-                Action::DrawBorder => {
-                    for x in 0..width {
-                        garden.draw_border_at(x, 0);
-                        garden.turtle_pos = Some((x, 0));
-                        render_screen(&header, &garden, args.no_color)?;
-                        tokio::time::sleep(Duration::from_millis(30)).await;
-                    }
-                    for y in 0..height {
-                        garden.draw_border_at(width - 1, y);
-                        garden.turtle_pos = Some((width - 1, y));
-                        render_screen(&header, &garden, args.no_color)?;
-                        tokio::time::sleep(Duration::from_millis(30)).await;
-                    }
-                    for x in (0..width).rev() {
-                        garden.draw_border_at(x, height - 1);
-                        garden.turtle_pos = Some((x, height - 1));
-                        render_screen(&header, &garden, args.no_color)?;
-                        tokio::time::sleep(Duration::from_millis(30)).await;
-                    }
-                    for y in (0..height).rev() {
-                        garden.draw_border_at(0, y);
-                        garden.turtle_pos = Some((0, y));
-                        render_screen(&header, &garden, args.no_color)?;
-                        tokio::time::sleep(Duration::from_millis(30)).await;
-                    }
-                    garden.turtle_pos = Some((1, 1));
-                    border_drawn = true;
-                }
-                Action::PlaceRock { x, y, size } => {
-                    animate_walk(&mut garden, x, y, &header, args.no_color).await?;
-                    garden.place_rock(x, y, size);
-                    render_screen(&header, &garden, args.no_color)?;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
-                Action::PlaceMoss { x, y } => {
-                    animate_walk(&mut garden, x, y, &header, args.no_color).await?;
-                    garden.place_moss(x, y);
-                    render_screen(&header, &garden, args.no_color)?;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
-                Action::PlaceFlower { x, y } => {
-                    animate_walk(&mut garden, x, y, &header, args.no_color).await?;
-                    garden.place_flower(x, y);
-                    render_screen(&header, &garden, args.no_color)?;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
-                Action::PlaceLantern { x, y } => {
-                    animate_walk(&mut garden, x, y, &header, args.no_color).await?;
-                    garden.place_lantern(x, y);
-                    render_screen(&header, &garden, args.no_color)?;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
-                Action::PlaceMandala { x, y, style } => {
-                    animate_walk(&mut garden, x, y, &header, args.no_color).await?;
-                    garden.place_mandala(x, y, style);
-                    render_screen(&header, &garden, args.no_color)?;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
-                Action::PlaceAscii { x, y, glyph } => {
-                    animate_walk(&mut garden, x, y, &header, args.no_color).await?;
-                    garden.place_ascii(x, y, &glyph);
-                    render_screen(&header, &garden, args.no_color)?;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
-                Action::DrawAsciiLine { y, x1, x2, glyph } => {
-                    animate_walk(&mut garden, x1, y, &header, args.no_color).await?;
-                    let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
-                    let step_range: Vec<usize> = if x1 <= x2 {
-                        (a..=b.min(width.saturating_sub(1))).collect()
+            if matches!(action, Action::DrawBorder) {
+                border_drawn = true;
+            }
+
+            let is_done = garden.execute_action(&action, &header, args.no_color).await?;
+            if is_done {
+                garden.turtle_glyph = if is_tabula { "[z]" } else { "💤" };
+                for remaining in (1..=20).rev() {
+                    if shutdown.load(Ordering::SeqCst) { break; }
+                    let h = if is_tabula {
+                        format!("✨ Tabula Rasa — \"{theme}\" — Complete! [z] admiring ({remaining}s until reset)")
+                    } else if is_wild {
+                        format!("🌊 Wild Zones — \"{theme}\" — Complete! 💤 admiring ({remaining}s until reset)")
                     } else {
-                        (a..=b.min(width.saturating_sub(1))).rev().collect()
+                        format!("🌿 karesansui — \"{theme}\" | Border: \"{border_name}\" — Complete! 💤 admiring ({remaining}s until reset)")
                     };
-                    for x in step_range {
-                        garden.turtle_pos = Some((x, y));
-                        garden.place_ascii(x, y, &glyph);
-                        render_screen(&header, &garden, args.no_color)?;
-                        tokio::time::sleep(Duration::from_millis(120)).await;
-                    }
+                    garden.render_screen(&h, args.no_color)?;
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
-                Action::PlaceGlyph { x, y, glyph } => {
-                    animate_walk(&mut garden, x, y, &header, args.no_color).await?;
-                    garden.place_glyph(x, y, &glyph);
-                    render_screen(&header, &garden, args.no_color)?;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                }
-                Action::DrawLine { y, x1, x2, glyph } => {
-                    animate_walk(&mut garden, x1, y, &header, args.no_color).await?;
-                    let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
-                    let step_range: Vec<usize> = if x1 <= x2 {
-                        (a..=b.min(width.saturating_sub(1))).collect()
-                    } else {
-                        (a..=b.min(width.saturating_sub(1))).rev().collect()
-                    };
-                    for x in step_range {
-                        garden.turtle_pos = Some((x, y));
-                        garden.place_glyph(x, y, &glyph);
-                        render_screen(&header, &garden, args.no_color)?;
-                        tokio::time::sleep(Duration::from_millis(120)).await;
-                    }
-                }
-                Action::DrawRing { cx, cy, radius, glyph } => {
-                    let pts = garden.ring_points(cx, cy, radius);
-                    if let Some(&(fx, fy)) = pts.first() {
-                        animate_walk(&mut garden, fx, fy, &header, args.no_color).await?;
-                    }
-                    for (x, y) in pts {
-                        garden.turtle_pos = Some((x, y));
-                        garden.place_glyph(x, y, &glyph);
-                        render_screen(&header, &garden, args.no_color)?;
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                    }
-                }
-                Action::FillBox { x1, y1, x2, y2, glyph } => {
-                    let (min_x, max_x) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
-                    let (min_y, max_y) = if y1 <= y2 { (y1, y2) } else { (y2, y1) };
-                    animate_walk(&mut garden, min_x, min_y, &header, args.no_color).await?;
-                    for y in min_y..=max_y.min(height.saturating_sub(1)) {
-                        for x in min_x..=max_x.min(width.saturating_sub(1)) {
-                            garden.turtle_pos = Some((x, y));
-                            garden.place_glyph(x, y, &glyph);
-                            render_screen(&header, &garden, args.no_color)?;
-                            tokio::time::sleep(Duration::from_millis(60)).await;
-                        }
-                    }
-                }
-                Action::ClearCell { x, y } => {
-                    animate_walk(&mut garden, x, y, &header, args.no_color).await?;
-                    garden.clear_cell(x, y);
-                    render_screen(&header, &garden, args.no_color)?;
-                    tokio::time::sleep(Duration::from_millis(300)).await;
-                }
-                Action::RakeLine { y, x1, x2 } => {
-                    animate_walk(&mut garden, x1, y, &header, args.no_color).await?;
-                    let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
-                    let step_range: Vec<usize> = if x1 <= x2 {
-                        (a..=b.min(width.saturating_sub(1))).collect()
-                    } else {
-                        (a..=b.min(width.saturating_sub(1))).rev().collect()
-                    };
-                    for x in step_range {
-                        garden.turtle_pos = Some((x, y));
-                        if garden.is_empty(x, y) {
-                            garden.grid[y][x] = RAKED.to_string();
-                        }
-                        render_screen(&header, &garden, args.no_color)?;
-                        tokio::time::sleep(Duration::from_millis(120)).await;
-                    }
-                }
-                Action::RakeRing { cx, cy, radius } => {
-                    let pts = garden.ring_points(cx, cy, radius);
-                    if let Some(first) = pts.first() {
-                        animate_walk(&mut garden, first.0, first.1, &header, args.no_color).await?;
-                    }
-                    for (x, y) in pts {
-                        garden.turtle_pos = Some((x, y));
-                        if garden.is_empty(x, y) {
-                            garden.grid[y][x] = RAKED.to_string();
-                        }
-                        render_screen(&header, &garden, args.no_color)?;
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                    }
-                }
-                Action::PlaceGravel { y, x1, x2 } => {
-                    animate_walk(&mut garden, x1, y, &header, args.no_color).await?;
-                    let (a, b) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
-                    let step_range: Vec<usize> = if x1 <= x2 {
-                        (a..=b.min(width.saturating_sub(1))).collect()
-                    } else {
-                        (a..=b.min(width.saturating_sub(1))).rev().collect()
-                    };
-                    for x in step_range {
-                        garden.turtle_pos = Some((x, y));
-                        if garden.is_empty(x, y) {
-                            garden.grid[y][x] = GRAVEL.to_string();
-                        }
-                        render_screen(&header, &garden, args.no_color)?;
-                        tokio::time::sleep(Duration::from_millis(120)).await;
-                    }
-                }
-                Action::Done => {
-                    garden.turtle_glyph = if is_tabula { "[z]" } else { "💤" };
-                    for remaining in (1..=20).rev() {
-                        let h = if is_tabula {
-                            format!("✨ Tabula Rasa — \"{theme}\" — Complete! [z] admiring ({remaining}s until reset)")
-                        } else if is_wild {
-                            format!("🌊 Wild Zones — \"{theme}\" — Complete! 💤 admiring ({remaining}s until reset)")
-                        } else {
-                            format!("🌿 karesansui — \"{theme}\" | Border: \"{border_name}\" — Complete! 💤 admiring ({remaining}s until reset)")
-                        };
-                        render_screen(&h, &garden, args.no_color)?;
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                    }
-                    break;
-                }
-                Action::PlaceMultiCellGlyph { anchor_x, anchor_y, glyphs } => {
-                    for (dx, dy, glyph) in &glyphs {
-                        let x = anchor_x.saturating_add(*dx);
-                        let y = anchor_y.saturating_add(*dy);
-                        garden.place_glyph(x, y, glyph);
-                    }
-                    garden.turtle_pos = Some((anchor_x, anchor_y));
-                    render_screen(&header, &garden, args.no_color)?;
-                    tokio::time::sleep(Duration::from_millis(60)).await;
-                }
-                Action::DrawFlowLine { points, glyph } => {
-                    for (x, y) in points {
-                        garden.place_glyph(x, y, &glyph);
-                        garden.turtle_pos = Some((x, y));
-                        render_screen(&header, &garden, args.no_color)?;
-                        tokio::time::sleep(Duration::from_millis(30)).await;
-                    }
-                }
-                Action::ApplyGlitchFilter { x, y, .. } => {
-                    let cell = garden.grid[y][x].clone();
-                    let corrupted = format!("?{}", cell.chars().next().unwrap_or(' '));
-                    garden.place_glyph(x, y, &corrupted);
-                    garden.turtle_pos = Some((x, y));
-                    render_screen(&header, &garden, args.no_color)?;
-                    tokio::time::sleep(Duration::from_millis(40)).await;
-                }
-                Action::PlaceBlendedGlyph { x, y, glyph, .. } => {
-                    garden.place_glyph(x, y, &glyph);
-                    garden.turtle_pos = Some((x, y));
-                    render_screen(&header, &garden, args.no_color)?;
-                    tokio::time::sleep(Duration::from_millis(40)).await;
-                }
+                break;
             }
 
             if args.resume || args.state_file.is_some() {
@@ -608,7 +390,7 @@ async fn main() -> Result<()> {
             let wait_dur = if prompt_count % 10 == 0 { rest_duration } else { pace_duration };
             garden.turtle_glyph = if is_tabula { "[z]" } else { "💤" };
             for remaining in (1..=wait_dur.as_secs()).rev() {
-                if session_start.elapsed() >= SESSION_DURATION {
+                if session_start.elapsed() >= SESSION_DURATION || shutdown.load(Ordering::SeqCst) {
                     break;
                 }
                 let status = if prompt_count % 10 == 0 {
@@ -623,7 +405,7 @@ async fn main() -> Result<()> {
                 } else {
                     format!("🌿 karesansui — Theme: \"{theme}\" | Border: \"{border_name}\"  {status}")
                 };
-                render_screen(&h, &garden, args.no_color)?;
+                garden.render_screen(&h, args.no_color)?;
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
             garden.turtle_glyph = if is_tabula { "[*]" } else { "🐢" };

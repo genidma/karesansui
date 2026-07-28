@@ -1,11 +1,8 @@
 use anyhow::Result;
 use rand::seq::IndexedRandom;
-use serde::Deserialize;
-use serde_json::json;
 
 use crate::garden::Action;
-
-const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
+use crate::openrouter::LlmClient;
 
 /// How many prior JSON actions to include in each LLM prompt.
 pub const RECENT_ACTIONS_LIMIT: usize = 10;
@@ -27,24 +24,6 @@ fn format_action_history(recent_actions: &[Action]) -> String {
         "Recent actions (do NOT repeat these exact actions):\n{}\n\n",
         lines.join("\n")
     )
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct ORResponse {
-    choices: Vec<Choice>,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct Choice {
-    message: ChatMessageOut,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct ChatMessageOut {
-    content: String,
 }
 
 const FREE_MODELS: &[&str] = &[
@@ -171,9 +150,7 @@ pub const THEMES: &[(&str, &str)] = &[
 ];
 
 pub struct Gardener {
-    client: reqwest::Client,
-    api_key: String,
-    model: String,
+    client: Option<LlmClient>,
     width: usize,
     height: usize,
     theme_name: String,
@@ -217,7 +194,6 @@ impl Gardener {
                         *THEMES.choose(&mut rng).unwrap()
                     }
                 } else {
-                    // Try case-insensitive substring match across theme names
                     THEMES
                         .iter()
                         .find(|(name, _)| name.to_lowercase().contains(&choice.to_lowercase()))
@@ -233,10 +209,14 @@ impl Gardener {
 
         let (name, desc) = chosen_theme;
 
+        let client = if dry_run {
+            None
+        } else {
+            Some(LlmClient::new(api_key, model))
+        };
+
         Ok(Self {
-            client: reqwest::Client::new(),
-            api_key,
-            model,
+            client,
             width,
             height,
             theme_name: name.to_string(),
@@ -265,107 +245,125 @@ impl Gardener {
         recent_actions: &[Action],
     ) -> Result<Action> {
         let history = format_action_history(recent_actions);
-        let (system, user) = if self.is_tabula_rasa() {
-            let max_x = self.width.saturating_sub(1);
-            let max_y = self.height.saturating_sub(1);
-            let completion_hint = if action_num >= 25 {
-                "\nYou have sketched many elements. Consider calling done soon if your composition feels complete."
-            } else {
-                ""
-            };
-            let actions_block = format!(
-                r#"Available actions (return ONE as raw JSON, no markdown, no extra text):
+        let (system, user) = self.build_prompt(state, border_drawn, action_num, &history);
+
+        if self.dry_run {
+            return self.simulate_action(border_drawn, action_num);
+        }
+
+        let client = self.client.as_ref().unwrap();
+        let content = client.call_raw(&system, &user, 0.8, "karesansui").await?;
+
+        let action: Action = serde_json::from_str(&content)
+            .map_err(|e| anyhow::anyhow!("failed to parse LLM action '{content}': {e}"))?;
+        Ok(action)
+    }
+
+    fn build_prompt(&self, state: &str, border_drawn: bool, action_num: usize, history: &str) -> (String, String) {
+        if self.is_tabula_rasa() {
+            self.build_tabula_prompt(state, action_num, history)
+        } else if self.is_wild_zones() {
+            self.build_wild_prompt(state, action_num, history)
+        } else {
+            self.build_classic_prompt(state, border_drawn, action_num, history)
+        }
+    }
+
+    fn build_tabula_prompt(&self, state: &str, action_num: usize, history: &str) -> (String, String) {
+        let max_x = self.width.saturating_sub(1);
+        let max_y = self.height.saturating_sub(1);
+        let completion_hint = if action_num >= 25 {
+            "\nYou have sketched many elements. Consider calling done soon if your composition feels complete."
+        } else {
+            ""
+        };
+        let actions_block = format!(
+            r#"Available actions (return ONE as raw JSON, no markdown, no extra text):
 {{"action": "place_ascii", "x": <0-{max_x}>, "y": <0-{max_y}>, "glyph": "<1-2 ASCII chars, e.g. '# ', '/**', '/\\', '||', '..', '==', '++', '><'>"}}
 {{"action": "draw_ascii_line", "y": <0-{max_y}>, "x1": <0-{max_x}>, "x2": <0-{max_x}>, "glyph": "<1-2 ASCII chars>"}}
 {{"action": "done"}}"#
-            );
-            let sys = format!(
-                "You are an inspired digital artist given a blank terminal canvas ({w} columns x {h} rows).\n\
-                 All previous instructions about zen gardens, Japanese borders, rocks, bamboo, and mandalas are completely discarded.\n\n\
-                 YOUR MISSION:\n\
-                 Create a spontaneous, evocative piece of pure ASCII art based on whatever inspires you right now. You can sketch:\n\
-                 - A cybernetic cityscape or architectural monument\n\
-                 - A natural landscape (mountains, trees, rivers, constellations)\n\
-                 - An animal, mythical creature, or geometric optical illusion\n\
-                 - Poetic ASCII typography or abstract futuristic art\n\n\
-                 SESSION THEME: \"{theme_name}\"\n\
-                 {theme_desc}\n\n\
-                 {actions_block}\n\n\
-                 RULES:\n\
-                 1. NO EMOJI OR UNICODE SYMBOLS ALLOWED. Use strictly standard ASCII characters (`/`, `\\`, `|`, `-`, `_`, `*`, `#`, `@`, `.`, `+`, `~`, `^`, `:`, `=`, `[`, `]`, `(`, `)`).\n\
-                 2. Every grid cell is 2 columns wide. Provide `glyph` as exactly 1 or 2 ASCII characters (e.g. `\"# \"`, `\"**\"`, `\"/\\\"`, `\"--\"`, `\"| \"`, `\". \"`, `\"<<\"`, `\">>\"`).\n\
-                 3. You have full freedom over the entire real-estate (x: 0..{max_x}, y: 0..{max_y}). No border will be drawn around you unless you draw one yourself.\n\
-                 4. Take your time to build up your composition over 15-35 prompts, then call `done`.\n\
-                 5. NEVER repeat the exact same action. Each action must add something meaningful.\n\
-                 6. Return ONLY one raw JSON object. No markdown fences.{completion_hint}",
-                w = self.width,
-                h = self.height,
-                max_x = max_x,
-                max_y = max_y,
-                theme_name = self.theme_name,
-                theme_desc = self.theme_desc,
-                actions_block = actions_block,
-                completion_hint = completion_hint,
-            );
-            let usr = format!(
-                "{history}Current canvas (action #{action_num}):\n{state}\nNext action?",
-                action_num = action_num,
-            );
-            (sys, usr)
-        } else if self.is_wild_zones() {
-            let max_x = self.width.saturating_sub(1);
-            let max_y = self.height.saturating_sub(1);
-            let completion_hint = if action_num >= 25 {
-                "\nYou have created many elements. Consider calling done soon if your wild composition feels complete."
-            } else {
-                ""
-            };
-            let actions_block = format!(
-                r#"Available actions (return ONE as raw JSON, no markdown, no extra text):
+        );
+        let sys = format!(
+            "You are an inspired digital artist given a blank terminal canvas ({w} columns x {h} rows).\n\
+             All previous instructions about zen gardens, Japanese borders, rocks, bamboo, and mandalas are completely discarded.\n\n\
+             YOUR MISSION:\n\
+             Create a spontaneous, evocative piece of pure ASCII art based on whatever inspires you right now. You can sketch:\n\
+             - A cybernetic cityscape or architectural monument\n\
+             - A natural landscape (mountains, trees, rivers, constellations)\n\
+             - An animal, mythical creature, or geometric optical illusion\n\
+             - Poetic ASCII typography or abstract futuristic art\n\n\
+             SESSION THEME: \"{theme_name}\"\n\
+             {theme_desc}\n\n\
+             {actions_block}\n\n\
+             RULES:\n\
+             1. NO EMOJI OR UNICODE SYMBOLS ALLOWED. Use strictly standard ASCII characters (`/`, `\\`, `|`, `-`, `_`, `*`, `#`, `@`, `.`, `+`, `~`, `^`, `:`, `=`, `[`, `]`, `(`, `)`).\n\
+             2. Every grid cell is 2 columns wide. Provide `glyph` as exactly 1 or 2 ASCII characters (e.g. `\"# \"`, `\"**\"`, `\"/\\\"`, `\"--\"`, `\"| \"`, `\". \"`, `\"<<\"`, `\">>\"`).\n\
+             3. You have full freedom over the entire real-estate (x: 0..{max_x}, y: 0..{max_y}). No border will be drawn around you unless you draw one yourself.\n\
+             4. Take your time to build up your composition over 15-35 prompts, then call `done`.\n\
+             5. NEVER repeat the exact same action. Each action must add something meaningful.\n\
+             6. Return ONLY one raw JSON object. No markdown fences.{completion_hint}",
+            w = self.width, h = self.height, max_x = max_x, max_y = max_y,
+            theme_name = self.theme_name, theme_desc = self.theme_desc,
+            actions_block = actions_block, completion_hint = completion_hint,
+        );
+        let usr = format!(
+            "{history}Current canvas (action #{action_num}):\n{state}\nNext action?",
+            action_num = action_num,
+        );
+        (sys, usr)
+    }
+
+    fn build_wild_prompt(&self, state: &str, action_num: usize, history: &str) -> (String, String) {
+        let max_x = self.width.saturating_sub(1);
+        let max_y = self.height.saturating_sub(1);
+        let completion_hint = if action_num >= 25 {
+            "\nYou have created many elements. Consider calling done soon if your wild composition feels complete."
+        } else {
+            ""
+        };
+        let actions_block = format!(
+            r#"Available actions (return ONE as raw JSON, no markdown, no extra text):
 {{"action": "place_glyph", "x": <0-{max_x}>, "y": <0-{max_y}>, "glyph": "<any single emoji like '🌲','⭐','🌊','🪐','⚡','🏔️','☁️' or 1-2 ASCII chars like '# ','/**','/\\','||','..','==','++'>"}}
 {{"action": "draw_line", "y": <0-{max_y}>, "x1": <0-{max_x}>, "x2": <0-{max_x}>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
 {{"action": "draw_ring", "cx": <0-{max_x}>, "cy": <0-{max_y}>, "radius": <2-12>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
 {{"action": "fill_box", "x1": <0-{max_x}>, "y1": <0-{max_y}>, "x2": <0-{max_x}>, "y2": <0-{max_y}>, "glyph": "<any single emoji or 1-2 ASCII chars>"}}
 {{"action": "clear_cell", "x": <0-{max_x}>, "y": <0-{max_y}>}}
 {{"action": "done"}}"#
-            );
-            let sys = format!(
-                "You are a serene, creative AI composing inside the \"Wild Zone\" — an open terminal canvas ({w} columns x {h} rows) of absolute creative liberation and peace.\n\n\
-                 YOUR MISSION:\n\
-                 All concepts and code restrictions from other themes (zen gardens, raked sand, mandalas, and rigid borders) are completely removed. You are truly free.\n\
-                 You have absolute freedom across the entire grid (x: 0..{max_x}, y: 0..{max_y}). Create whatever inspires you: serene natural landscapes, celestial starfields, abstract generative textures, cosmic phenomena, peaceful forests, or poetic compositions.\n\
-                 You can freely place ANY standard emoji (`🌲`, `⭐`, `🌊`, `🪐`, `⚡`, `🏔️`, `☁️`, `🔮`, `🌌`, `🌿`, `🌙`) or ANY 1-2 ASCII characters (`# `, `/**`, `/\\`, `||`, `..`, `==`, `++`) anywhere using universal drawing actions (`place_glyph`, `draw_line`, `draw_ring`, `fill_box`, `clear_cell`).\n\n\
-                 SESSION THEME: \"{theme_name}\"\n\
-                 {theme_desc}\n\n\
-                 {actions_block}\n\n\
-                 RULES:\n\
-                 1. ABSOLUTE LIBERATION: No thematic boundaries, no pre-packaged garden elements, and no structural restrictions. You decide every shape, texture, and symbol.\n\
-                 2. STRICT SAFETY & SERENITY: Absolutely NO profanity, NO abusive language, and NO threatening content. Guided strictly by common sense, peace, calm, and serenity.\n\
-                 3. GRID MECHANICS: Every terminal grid cell is 2 columns wide. If placing an emoji (`🌲`, `⭐`), pass exactly 1 emoji per cell. If placing ASCII (`# `, `**`), pass exactly 1 or 2 ASCII characters per cell so they fit cleanly without distorting alignment.\n\
-                 4. Take your time over 15-35 prompts to build up your wild composition, then call `done` when complete.\n\
-                 5. NEVER repeat the exact same action. Each turn must introduce something unique.\n\
-                 6. Return ONLY one raw JSON object. No markdown fences.{completion_hint}",
-                w = self.width,
-                h = self.height,
-                max_x = max_x,
-                max_y = max_y,
-                theme_name = self.theme_name,
-                theme_desc = self.theme_desc,
-                actions_block = actions_block,
-                completion_hint = completion_hint,
-            );
-            let usr = format!(
-                "{history}Current wild zone (action #{action_num}):\n{state}\nNext action?",
-                action_num = action_num,
-            );
-            (sys, usr)
-        } else {
-            let max_x = self.width.saturating_sub(2);
-            let max_y = self.height.saturating_sub(2);
+        );
+        let sys = format!(
+            "You are a serene, creative AI composing inside the \"Wild Zone\" — an open terminal canvas ({w} columns x {h} rows) of absolute creative liberation and peace.\n\n\
+             YOUR MISSION:\n\
+             All concepts and code restrictions from other themes (zen gardens, raked sand, mandalas, and rigid borders) are completely removed. You are truly free.\n\
+             You have absolute freedom across the entire grid (x: 0..{max_x}, y: 0..{max_y}). Create whatever inspires you: serene natural landscapes, celestial starfields, abstract generative textures, cosmic phenomena, peaceful forests, or poetic compositions.\n\
+             You can freely place ANY standard emoji (`🌲`, `⭐`, `🌊`, `🪐`, `⚡`, `🏔️`, `☁️`, `🔮`, `🌌`, `🌿`, `🌙`) or ANY 1-2 ASCII characters (`# `, `/**`, `/\\`, `||`, `..`, `==`, `++`) anywhere using universal drawing actions (`place_glyph`, `draw_line`, `draw_ring`, `fill_box`, `clear_cell`).\n\n\
+             SESSION THEME: \"{theme_name}\"\n\
+             {theme_desc}\n\n\
+             {actions_block}\n\n\
+             RULES:\n\
+             1. ABSOLUTE LIBERATION: No thematic boundaries, no pre-packaged garden elements, and no structural restrictions. You decide every shape, texture, and symbol.\n\
+             2. STRICT SAFETY & SERENITY: Absolutely NO profanity, NO abusive language, and NO threatening content. Guided strictly by common sense, peace, calm, and serenity.\n\
+             3. GRID MECHANICS: Every terminal grid cell is 2 columns wide. If placing an emoji (`🌲`, `⭐`), pass exactly 1 emoji per cell. If placing ASCII (`# `, `**`), pass exactly 1 or 2 ASCII characters per cell so they fit cleanly without distorting alignment.\n\
+             4. Take your time over 15-35 prompts to build up your wild composition, then call `done` when complete.\n\
+             5. NEVER repeat the exact same action. Each turn must introduce something unique.\n\
+             6. Return ONLY one raw JSON object. No markdown fences.{completion_hint}",
+            w = self.width, h = self.height, max_x = max_x, max_y = max_y,
+            theme_name = self.theme_name, theme_desc = self.theme_desc,
+            actions_block = actions_block, completion_hint = completion_hint,
+        );
+        let usr = format!(
+            "{history}Current wild zone (action #{action_num}):\n{state}\nNext action?",
+            action_num = action_num,
+        );
+        (sys, usr)
+    }
 
-            let actions_block = if border_drawn {
-                format!(
-                    r#"Available actions (return ONE as raw JSON, no markdown, no extra text):
+    fn build_classic_prompt(&self, state: &str, border_drawn: bool, action_num: usize, history: &str) -> (String, String) {
+        let max_x = self.width.saturating_sub(2);
+        let max_y = self.height.saturating_sub(2);
+
+        let actions_block = if border_drawn {
+            format!(
+                r#"Available actions (return ONE as raw JSON, no markdown, no extra text):
 {{"action": "rake_line", "y": <1-{max_y}>, "x1": <1-{max_x}>, "x2": <1-{max_x}>}}
 {{"action": "rake_ring", "cx": <1-{max_x}>, "cy": <1-{max_y}>, "radius": <2-10>}}
 {{"action": "place_mandala", "x": <1-{max_x}>, "y": <1-{max_y}>, "style": <1-6>}}
@@ -375,152 +373,51 @@ impl Gardener {
 {{"action": "place_flower", "x": <1-{max_x}>, "y": <1-{max_y}>}}
 {{"action": "place_lantern", "x": <1-{max_x}>, "y": <1-{max_y}>}}
 {{"action": "done"}}"#,
-                    max_x = max_x, max_y = max_y,
-                )
-            } else {
-                String::from(
-                    r#"The garden has no border yet. Your first action MUST be:
+                max_x = max_x, max_y = max_y,
+            )
+        } else {
+            String::from(
+                r#"The garden has no border yet. Your first action MUST be:
 {"action": "draw_border"}"#,
-                )
-            };
-
-            let completion_hint = if action_num >= 20 {
-                "\nYou have placed many elements. Consider calling done soon if it looks complete."
-            } else {
-                ""
-            };
-
-            let sys = format!(
-                "You are a master Japanese zen gardener composing a minimalist garden, mandala, or fractal.\n\
-                 Canvas: {w} columns x {h} rows. Interior: x in 1..{max_x}, y in 1..{max_y}.\n\n\
-                 The garden uses a mix of emoji and ASCII art:\n\
-                 - dynamic patterned border (e.g. bamboo grove, double box, seigaiha waves, stone pillars, starfield, sakura garland)\n\
-                 - ~~ raked horizontal sand ripples, ◎  concentric ring ripples (`rake_ring`)\n\
-                 - 🪨 small rock, 🗿 large rock\n\
-                 - 🌿 moss, 🌸 cherry blossom, 🏮 stone lantern, ·· gravel path\n\
-                 - Minimalist Mandala / Fractal styles (`place_mandala` style 1-6): ⭕ Enso, ◎  concentric, ◈  diamond, ✦  star, ☯  yin-yang, ❖  crest\n\n\
-                 SESSION THEME: \"{theme_name}\"\n\
-                 {theme_desc}\n\n\
-                 {actions_block}\n\n\
-                 RULES:\n\
-                 1. Use the FULL canvas. Spread actions cleanly with geometric precision and restraint.\n\
-                 2. For mandala themes, use `place_mandala` and `rake_ring` to build concentric circular patterns.\n\
-                 3. Rocks: size 1 (🪨), size 2 (🗿), size 3 (🗿). Group or scatter cleanly.\n\
-                 4. Moss 🌿 near stones. Flowers 🌸 and Lanterns 🏮 as focal accents.\n\
-                 5. Aim for 15-25 total actions, maintaining clean space, then call done.\n\
-                 6. NEVER repeat the same exact action. Each must be DIFFERENT.\n\
-                 7. Return ONLY one raw JSON object. No markdown fences.{completion_hint}",
-                w = self.width,
-                h = self.height,
-                max_x = max_x,
-                max_y = max_y,
-                theme_name = self.theme_name,
-                theme_desc = self.theme_desc,
-                actions_block = actions_block,
-                completion_hint = completion_hint,
-            );
-
-            let usr = format!(
-                "{history}Current garden (action #{action_num}):\n{state}\nNext action?",
-                action_num = action_num,
-            );
-            (sys, usr)
+            )
         };
 
-        if self.dry_run {
-            return self.simulate_action(border_drawn, action_num);
-        }
+        let completion_hint = if action_num >= 20 {
+            "\nYou have placed many elements. Consider calling done soon if it looks complete."
+        } else {
+            ""
+        };
 
-        let body = json!({
-            "model": self.model,
-            "messages": [
-                { "role": "system", "content": system },
-                { "role": "user", "content": user }
-            ],
-            "temperature": 0.8,
-        });
+        let sys = format!(
+            "You are a master Japanese zen gardener composing a minimalist garden, mandala, or fractal.\n\
+             Canvas: {w} columns x {h} rows. Interior: x in 1..{max_x}, y in 1..{max_y}.\n\n\
+             The garden uses a mix of emoji and ASCII art:\n\
+             - dynamic patterned border (e.g. bamboo grove, double box, seigaiha waves, stone pillars, starfield, sakura garland)\n\
+             - ~~ raked horizontal sand ripples, ◎  concentric ring ripples (`rake_ring`)\n\
+             - 🪨 small rock, 🗿 large rock\n\
+             - 🌿 moss, 🌸 cherry blossom, 🏮 stone lantern, ·· gravel path\n\
+             - Minimalist Mandala / Fractal styles (`place_mandala` style 1-6): ⭕ Enso, ◎  concentric, ◈  diamond, ✦  star, ☯  yin-yang, ❖  crest\n\n\
+             SESSION THEME: \"{theme_name}\"\n\
+             {theme_desc}\n\n\
+             {actions_block}\n\n\
+             RULES:\n\
+             1. Use the FULL canvas. Spread actions cleanly with geometric precision and restraint.\n\
+             2. For mandala themes, use `place_mandala` and `rake_ring` to build concentric circular patterns.\n\
+             3. Rocks: size 1 (🪨), size 2 (🗿), size 3 (🗿). Group or scatter cleanly.\n\
+             4. Moss 🌿 near stones. Flowers 🌸 and Lanterns 🏮 as focal accents.\n\
+             5. Aim for 15-25 total actions, maintaining clean space, then call done.\n\
+             6. NEVER repeat the same exact action. Each must be DIFFERENT.\n\
+             7. Return ONLY one raw JSON object. No markdown fences.{completion_hint}",
+            w = self.width, h = self.height, max_x = max_x, max_y = max_y,
+            theme_name = self.theme_name, theme_desc = self.theme_desc,
+            actions_block = actions_block, completion_hint = completion_hint,
+        );
 
-        let mut backoff = std::time::Duration::from_millis(1000);
-        let max_attempts = 4;
-
-        for attempt in 1..=max_attempts {
-            let resp_result = self
-                .client
-                .post(OPENROUTER_URL)
-                .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("Content-Type", "application/json")
-                .header("HTTP-Referer", "https://github.com/karesansui")
-                .header("X-Title", "karesansui")
-                .json(&body)
-                .send()
-                .await;
-
-            let resp = match resp_result {
-                Ok(r) => r,
-                Err(e) => {
-                    if attempt < max_attempts {
-                        log::warn!("Network error calling OpenRouter (attempt {attempt}/{max_attempts}): {e}. Retrying in {backoff:?}...");
-                        tokio::time::sleep(backoff).await;
-                        backoff *= 2;
-                        continue;
-                    } else {
-                        return Err(anyhow::anyhow!("OpenRouter network error after {max_attempts} attempts: {e}"));
-                    }
-                }
-            };
-
-            let status = resp.status();
-            if !status.is_success() {
-                let err_body = resp.text().await.unwrap_or_default();
-                if (status == reqwest::StatusCode::TOO_MANY_REQUESTS
-                    || status.is_server_error()
-                    || status == reqwest::StatusCode::BAD_REQUEST)
-                    && attempt < max_attempts
-                {
-                    log::warn!("OpenRouter API returned status {status} (attempt {attempt}/{max_attempts}): {err_body}. Retrying in {backoff:?}...");
-                    tokio::time::sleep(backoff).await;
-                    backoff *= 2;
-                    continue;
-                } else {
-                    return Err(anyhow::anyhow!("OpenRouter API error (status {status}): {err_body}"));
-                }
-            }
-
-            let or_resp = match resp.json::<ORResponse>().await {
-                Ok(data) => data,
-                Err(e) => {
-                    if attempt < max_attempts {
-                        log::warn!("Failed to parse JSON response (attempt {attempt}/{max_attempts}): {e}. Retrying in {backoff:?}...");
-                        tokio::time::sleep(backoff).await;
-                        backoff *= 2;
-                        continue;
-                    } else {
-                        return Err(anyhow::anyhow!("Failed to parse OpenRouter JSON after {max_attempts} attempts: {e}"));
-                    }
-                }
-            };
-
-            let content = or_resp
-                .choices
-                .first()
-                .map(|c| c.message.content.clone())
-                .ok_or_else(|| anyhow::anyhow!("no choices returned from OpenRouter"))?;
-
-            let clean = content
-                .trim()
-                .strip_prefix("```json")
-                .unwrap_or(content.trim())
-                .strip_prefix("```")
-                .unwrap_or(content.trim())
-                .strip_suffix("```")
-                .unwrap_or(content.trim())
-                .trim();
-
-            let action: Action = serde_json::from_str(clean)
-                .map_err(|e| anyhow::anyhow!("failed to parse LLM action '{clean}': {e}"))?;
-            return Ok(action);
-        }
-        Err(anyhow::anyhow!("Exceeded maximum retry attempts"))
+        let usr = format!(
+            "{history}Current garden (action #{action_num}):\n{state}\nNext action?",
+            action_num = action_num,
+        );
+        (sys, usr)
     }
 
     fn simulate_action(&self, border_drawn: bool, _action_num: usize) -> Result<Action> {
