@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// A single gardener action returned by the LLM.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,9 +39,84 @@ pub enum Action {
     DrawBorder,
     /// Signal that the garden composition is complete.
     Done,
+    /// Place a multi-cell glyph pattern (for enhanced Tabula Rasa and Matrix ASCII)
+    PlaceMultiCellGlyph {
+        anchor_x: usize,
+        anchor_y: usize,
+        glyphs: Vec<(usize, usize, String)>, // (dx, dy, glyph)
+    },
+    /// Draw a flow line with proportional spacing (for Enhanced Tabula Rasa)
+    DrawFlowLine {
+        points: Vec<(usize, usize)>,
+        glyph: String,
+    },
+    /// Apply glitch escape sequences and corruption (for Glitch ASCII)
+    ApplyGlitchFilter {
+        action_x: usize,
+        action_y: usize,
+        filter_type: GlitchFilterType,
+    },
+    /// Place a glyph with custom blending (for Matrix ASCII)
+    PlaceBlendedGlyph {
+        x: usize,
+        y: usize,
+        glyph: String,
+        blend_mode: BlendMode,
+        opacity: f32,
+    },
 }
 
 pub const EMPTY: &str = "  ";
+
+/// Various ASCII art theme modes for flexible glyph rendering
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum AsciiTheme {
+    Classic,          // Standard 2-column ASCII
+    TabulaRasa,       // Pure ASCII, no restrictions
+    WildZones,        // Unicode freedom, no borders
+    ChaoticASCII,     // Variable width, overlapping, absolute freedom
+    EnhancedTabulaRasa, // Enhanced ASCII with proportional placement
+    MatrixASCII,      // Overlapping, layered glyphs
+    GlitchASCII,      // Unicode chaos, escape sequences
+}
+
+impl AsciiTheme {
+    pub fn max_glyph_width(&self) -> usize {
+        match self {
+            AsciiTheme::Classic => 2,
+            AsciiTheme::TabulaRasa => 2,
+            AsciiTheme::WildZones => 2,
+            AsciiTheme::ChaoticASCII => 4,
+            AsciiTheme::EnhancedTabulaRasa => 8,
+            AsciiTheme::MatrixASCII => 4,
+            AsciiTheme::GlitchASCII => 8,
+        }
+    }
+    
+    pub fn allow_overlapping(&self) -> bool {
+        match self {
+            AsciiTheme::Classic => false,
+            AsciiTheme::TabulaRasa => true,
+            AsciiTheme::WildZones => true,
+            AsciiTheme::ChaoticASCII => true,
+            AsciiTheme::EnhancedTabulaRasa => true,
+            AsciiTheme::MatrixASCII => true,
+            AsciiTheme::GlitchASCII => true,
+        }
+    }
+    
+    pub fn restrict_to_ascii(&self) -> bool {
+        match self {
+            AsciiTheme::Classic => true,
+            AsciiTheme::TabulaRasa => true,
+            AsciiTheme::WildZones => false,
+            AsciiTheme::ChaoticASCII => false,
+            AsciiTheme::EnhancedTabulaRasa => true,
+            AsciiTheme::MatrixASCII => false,
+            AsciiTheme::GlitchASCII => false,
+        }
+    }
+}
 #[allow(dead_code)]
 pub const BORDER: &str = "🎋";
 pub const RAKED: &str = "~~";
@@ -59,6 +135,28 @@ pub const MANDALA_CORE: &str = "◈ ";
 pub const FRACTAL_STAR: &str = "✦ ";
 pub const YIN_YANG: &str = "☯ ";
 pub const CREST: &str = "❖ ";
+
+/// Blend modes for Matrix ASCII overlapping glyphs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum BlendMode {
+    Replace,     // Standard overwrite
+    Add,         // Additive blending
+    Multiply,    // Multiply effect
+    Difference,  // Difference mode
+    Screen,      // Screen effect
+    Custom,      // Custom function
+}
+
+/// Glitch filter types for Glitch ASCII
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum GlitchFilterType {
+    CharSwap,      // Swap characters randomly
+    WidthShift,    // Shift characters horizontally
+    HeightShift,   // Shift characters vertically
+    ColorInvert,   // Invert color if supported
+    GlitchBurst,   // Random corruption bursts
+    EscapeSequence,// Apply escape sequences
+}
 
 /// A geometric, patterned, and aesthetically pleasing border style.
 #[derive(Debug, Clone)]
@@ -175,6 +273,7 @@ pub struct GardenState {
     pub border_pattern_index: usize,
     pub prompt_count: usize,
     pub theme_name: String,
+    pub ascii_theme: AsciiTheme,
 }
 
 /// The ASCII + emoji zen garden grid.
@@ -190,6 +289,19 @@ pub struct Garden {
     /// The aesthetic border pattern framing this session's garden.
     pub border_pattern: BorderPattern,
     pub border_pattern_index: usize,
+    /// Current ASCII theme affecting rendering behavior
+    pub ascii_theme: AsciiTheme,
+    /// Layered glyph support for Matrix ASCII
+    pub glyph_layers: HashMap<(usize, usize), Vec<LayeredGlyph>>,
+}
+
+/// A glyph layer for overlapping ASCII art
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayeredGlyph {
+    pub content: String,
+    pub z_index: i32,
+    pub blend_mode: BlendMode,
+    pub opacity: f32,
 }
 
 impl Garden {
@@ -207,6 +319,8 @@ impl Garden {
             turtle_glyph: "🐢",
             border_pattern,
             border_pattern_index: idx,
+            ascii_theme: AsciiTheme::Classic,
+            glyph_layers: HashMap::new(),
         }
     }
 
@@ -565,6 +679,8 @@ impl Garden {
             turtle_glyph,
             border_pattern,
             border_pattern_index: state.border_pattern_index,
+            ascii_theme: AsciiTheme::Classic,  // Default, may be overridden later
+            glyph_layers: HashMap::new(),
         };
         Ok((garden, state.prompt_count, state.theme_name))
     }
