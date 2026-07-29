@@ -14,6 +14,7 @@ pub struct GridwrightRunner {
     step: bool,
     no_color: bool,
     snapshot_path: Option<String>,
+    steering: Option<String>,
 }
 
 impl GridwrightRunner {
@@ -36,6 +37,7 @@ impl GridwrightRunner {
             step: false,
             no_color: false,
             snapshot_path: None,
+            steering: None,
         }
     }
 
@@ -81,7 +83,7 @@ impl GridwrightRunner {
     }
 
     /// Run a complete Gridwright session: initialize canvas, get LLM actions, and execute them with live rendering.
-    pub async fn run(&self) -> Result<Canvas> {
+    pub async fn run(&mut self) -> Result<Canvas> {
         let mut canvas = Canvas::new(self.config.width, self.config.height);
         let palette = self.select_palette(&self.config.palette);
 
@@ -173,11 +175,19 @@ impl GridwrightRunner {
             }
 
             if self.step {
-                log::info!("Step completed (action #{action_count}). Exiting step mode.");
-                break;
-            }
-
-            if self.pace > Duration::ZERO {
+                log::info!("Step completed (action #{action_count}).");
+                print!("\n  Press Enter for next action, or type instructions to steer the LLM: ");
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
+                let mut input = String::new();
+                let _ = std::io::stdin().read_line(&mut input);
+                let trimmed = input.trim().to_string();
+                if trimmed.is_empty() {
+                    self.steering = None;
+                } else {
+                    self.steering = Some(trimmed);
+                }
+            } else if self.pace > Duration::ZERO {
                 tokio::time::sleep(self.pace).await;
             }
         }
@@ -189,9 +199,14 @@ impl GridwrightRunner {
     async fn get_next_action(&self, canvas: &Canvas, action_num: usize) -> Result<PixelArtAction> {
         let canvas_preview = self.render_canvas_preview(canvas);
         let system_prompt = self.config.generate_system_prompt();
+        let steering = self
+            .steering
+            .as_ref()
+            .map(|s| format!("\nUser steering: {s}\n"))
+            .unwrap_or_default();
         let user_prompt = format!(
-            "Canvas state (action #{} of {} max):\n{}\n\nProvide your next action as ONE single valid JSON object from your capability toolkit (`clear_canvas`, `fill_rectangle`, `draw_rectangle`, `fill_circle`, `draw_circle`, `draw_line_h`, `draw_line_v`, `draw_line_diag`, `draw_path`, `set_pixel`, or `done`). Use exact coordinate math (`x: 0..{}`, `y: 0..{}`), `color_index` (`0..7`), and 2-character wide block glyphs (`██`, `▓▓`, `▒▒`, `░░`, `■ `, `  `).",
-            action_num, self.config.max_actions, canvas_preview, self.config.width.saturating_sub(1), self.config.height.saturating_sub(1)
+            "Canvas state (action #{} of {} max):\n{canvas_preview}{steering}\n\nProvide your next action as ONE single valid JSON object from your capability toolkit (`clear_canvas`, `fill_rectangle`, `draw_rectangle`, `fill_circle`, `draw_circle`, `draw_line_h`, `draw_line_v`, `draw_line_diag`, `draw_path`, `set_pixel`, or `done`). Use exact coordinate math (`x: 0..{}`, `y: 0..{}`), `color_index` (`0..7`), and 2-character wide block glyphs (`██`, `▓▓`, `▒▒`, `░░`, `■ `, `  `).",
+            action_num, self.config.max_actions, self.config.width.saturating_sub(1), self.config.height.saturating_sub(1)
         );
 
         if self.dry_run {

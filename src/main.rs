@@ -112,6 +112,13 @@ fn interactive_menu(args: &mut CliArgs) -> Result<()> {
         }
     }
 
+    line.clear();
+    print!("Enable step mode? (y/N) — pause between each action to steer the LLM: ");
+    std::io::Write::flush(&mut std::io::stdout())?;
+    if reader.read_line(&mut line).is_ok() {
+        args.step = line.trim().eq_ignore_ascii_case("y") || line.trim().eq_ignore_ascii_case("yes");
+    }
+
     println!("\n✨ Settings saved! The turtle (`🐢`) is getting ready...\n");
     std::thread::sleep(Duration::from_secs(1));
     Ok(())
@@ -181,7 +188,7 @@ async fn main() -> Result<()> {
             .with_palette("gridwright_spec")
             .with_composition("Balanced, chunky blocks, hard edges, visible pixels, strong negative space")
             .with_max_actions(20);
-        let runner = GridwrightRunner::new(gridwright_api_key, model, config, args.dry_run)
+        let mut runner = GridwrightRunner::new(gridwright_api_key, model, config, args.dry_run)
             .with_pace(Duration::from_secs(1))
             .with_step(args.step)
             .with_no_color(args.no_color)
