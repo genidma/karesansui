@@ -160,6 +160,8 @@ docker build -t karesansui .
 
 > **Note:** The first build downloads and compiles all Rust dependencies and may take several minutes. Subsequent builds are nearly instant thanks to Docker layer caching.
 
+> **Note:** The final image is ~15-20MB (Alpine base + single static binary).
+
 ### Run
 
 The container requires an interactive terminal (`-it`) and your LLM API credentials. Use `--rm` to clean up automatically on exit.
