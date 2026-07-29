@@ -1,41 +1,27 @@
 # karesansui
 
-> CLI turtle that generates creative ASCII art in your terminal.
+> CLI that generates creative ASCII art in your terminal.
 
 `karesansui` (枯山水) is a tiny Rust CLI that generates ASCII art on a terminal canvas.
 An LLM (via any OpenAI-compatible API — NVIDIA NIM, OpenRouter, etc.) composes a complete
-artwork in a single shot: 20-40 actions that create a full composition. The turtle (`🐢`)
-then animates each action step-by-step, bringing the artwork to life right in your terminal.
+artwork in a single shot: 20-40 actions that create a full composition, then animates each
+action step-by-step, bringing the artwork to life right in your terminal.
 
-**Every run starts in Creative Freedom mode** — the turtle asks the LLM a completely open-ended
-question: "What would you want to create today and why?" The LLM can respond with any ASCII art it
+**Every run starts in Creative Freedom mode** — the LLM is asked a completely open-ended
+question: "What would you want to create today and why?" It can respond with any ASCII art it
 imagines, using any emoji or character, with zero constraints. If it chooses not to create anything,
-we just sit and stare at a blank terminal. You can also use `-t` to explore **20 themed styles** — 
-from zen garden classics like *Three Mountain Sanzen* and *Moonlit Reef* to *Sacred Geometry Mandala*,
-**Tabula Rasa (Pure ASCII Muse)**, **Wild Zones (Unbound Serenity)**,
-and **Gridwright (The Deliberate Grid as Craft)**. These themes use the structured action system
-(rocks, raking, moss, etc.).
+we just sit and stare at a blank terminal.
 
 ## How it works
 
-Creative Freedom mode:
-- The turtle asks the LLM a completely open-ended question: "What would you like to create today?"
-- The LLM responds with raw ASCII/emoji art in a fenced code block, plus a narrative explanation.
+- The LLM is asked a completely open-ended question: "What would you like to create today?"
+- It responds with raw ASCII/emoji art in a fenced code block, plus a narrative explanation.
 - The artwork is rendered directly on the canvas — no action types, no constraints.
 - If the LLM chooses not to create, the canvas stays blank (and that's okay).
-
-Other themes (Tabula Rasa, Wild Zones, Classic):
-- The LLM is asked to compose a complete piece of ASCII art in one response.
-- The LLM (taking 1-3 minutes) returns a JSON array of 20-40 actions.
-- The turtle (`🐢`) animates each action sequentially with smooth `crossterm` rendering.
-- The final piece is displayed — admire for 15 seconds, then the next piece begins.
-- Use `-t` to pick a theme, `-d` for dry-run simulation, `--step` to approve actions one-by-one.
+- After completion, the piece is displayed for admiration, then the canvas clears and a new piece begins.
+- Use `-d` for dry-run simulation, `--step` to approve actions one-by-one.
 - If network rate-limits (429) occur, the engine reads the `Retry-After` header and backs off.
 - Press `Ctrl+C` at any time for graceful shutdown.
-
-## What will it make?
-
-That is for the gardener to decide. Run it and see. 🍃
 
 ## Commands & Usage
 
@@ -51,11 +37,6 @@ cargo run -- -i
 ### Command-Line Flags
 
 ```bash
-# Choose a specific theme:
-cargo run -- -t "Tabula Rasa"
-cargo run -- -t random
-cargo run -- -t classic
-
 # Run an offline simulation (dry run) with single-step verification:
 cargo run -- --dry-run --step --snapshot garden_dump.txt
 
@@ -71,42 +52,15 @@ cargo run -- --help
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
-| `--theme <THEME>` | `-t` | `creative` | Theme name, index (`1-21`), `random`, or `classic` |
 | `--width <WIDTH>` | `-w` | `48` | Grid width in terminal columns |
 | `--height <HEIGHT>` | | `20` | Grid height in terminal rows |
 | `--pace <MS>` | `-p` | `80` | Milliseconds between animation steps |
-| `--interactive` | `-i` | `false` | Launch interactive theme/menu selection |
+| `--interactive` | `-i` | `false` | Launch interactive menu selection |
 | `--dry-run` | `-d` | `false` | Offline simulation without LLM API calls |
 | `--step` | `-s` | `false` | Single-step mode: press Enter between each action |
 | `--snapshot <PATH>` | | — | Save final canvas to file |
 | `--no-color` | | `false` | Disable crossterm coloring, plain text output |
 | `--admire <SECS>` | | `20` | Seconds to admire artwork before next piece (`0` = forever until Ctrl+C) |
-
-## Themes
-
-Each run selects or assigns one of **21 themes**:
-
-- **Creative Freedom** ⭐ *(default)* — the turtle asks "what would you want to create today and why?" and the LLM responds with whatever ASCII art it imagines, with zero constraints. If it chooses not to create, we stare at a blank terminal.
-- **Moonlit Reef** — coral reef clusters with sweeping sand curves
-- **Dragon Tail Ripples** — flowing diagonal rake lines in an S-curve
-- **Three Mountain Sanzen** — classic triadic rock composition
-- **Autumn Sand Drift** — wind-blown gravel and asymmetric rake patterns
-- **Island Archipelago** — isolated rock islands with sand channels
-- **Stepping Stone Path** — diagonal path of rocks with perpendicular raking
-- **Crane and Turtle** — two contrasting rock groupings connected by gravel
-- **Zen Minimalist** — extreme restraint, few rocks, full-row raking
-- **Forest Clearing** — moss canopy edges with a central clearing
-- **Whirlpool Basin** — spiral-converging rake lines around a center cluster
-- **Scattered Stars** — many small rocks like a star field
-- **River Delta** — fanning rake lines like a branching river
-- **Sacred Geometry Mandala** — radial symmetry with concentric rings and diamond/star cores
-- **Enso Fractal Solitude** — minimalist void anchored by a single Enso circle
-- **Concentric Rings of Sanzen** — nested circular ripples around triadic rock placements
-- **Fractal Starfield Void** — self-similar lattice of stars and geometric crests
-- **Yin-Yang Balance** — dual equilibrium of circular sand rings and textured gravel
-- **Tabula Rasa (Pure ASCII Muse)** — pure ASCII sketching, no emoji
-- **Wild Zones (Unbound Serenity)** — complete freedom across all emoji and symbols
-- **Gridwright (The Deliberate Grid as Craft)** — pixel-perfect grid art with chunky blocks and color palettes
 
 ## Providers & Models
 
@@ -184,9 +138,6 @@ docker run -it --rm -e LLM_API_KEY=sk-or-... karesansui
 Append flags after `--` so they are passed to the binary rather than to Docker:
 
 ```bash
-# Classic theme with a larger canvas
-docker run -it --rm --env-file .env karesansui -- -t classic --width 64 --height 24
-
 # Interactive menu mode
 docker run -it --rm --env-file .env karesansui -- -i
 
@@ -207,8 +158,8 @@ docker run -it --rm --env-file .env karesansui -- --dry-run --step --snapshot /t
 ## Layout
 
 - `src/openrouter.rs` — `LlmClient` shared HTTP client: configurable endpoint, Bearer auth, exponential backoff, 429 Retry-After support, OpenRouter-specific headers.
-- `src/garden.rs` — `Garden` grid, `crossterm` rendering, `BorderPattern` (12 dynamic border styles), `Action` enum with `execute_action()` dispatch and turtle animation.
-- `src/llm.rs` — LLM prompt engineer: 21-theme pool, `FREE_MODELS` allowlist (bypassed with custom `LLM_API_URL`), one-shot composition prompt, offline simulation.
+- `src/garden.rs` — `Garden` grid, `crossterm` rendering, `BorderPattern` (12 dynamic border styles), `Action` enum with `execute_action()` dispatch.
+- `src/llm.rs` — LLM prompt engine: composable prompts, FREE_MODELS allowlist, one-shot composition, offline simulation.
 - `src/main.rs` — CLI parser (`clap`), interactive menu (`-i`), `crossterm` screen management, `Ctrl+C` shutdown handler, single-step debugging (`--step`).
 - `src/vec.rs` — `Point` geometry, Bresenham lines, Midpoint Circle, distance calculations, filled rectangles.
 - `src/color.rs` — RGB color management, 5 pre-defined palettes, palette quantization.
