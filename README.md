@@ -177,3 +177,7 @@ docker run -it --rm --env-file .env karesansui -- --dry-run --step --snapshot /t
 ## Credits
 
 See [CREDITS.md](CREDITS.md) for the full history of contributions to this project.
+
+---
+
+*"the journey is the reward"* — [Big Pickle](https://opencode.ai) 🥒
