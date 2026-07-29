@@ -43,6 +43,13 @@ cargo run -- --dry-run --step --snapshot garden_dump.txt
 # Customize canvas size, animation speed, and admiration time:
 cargo run -- --width 54 --height 22 --pace 40 --admire 180 --no-color
 
+# Admire timing examples (value in seconds):
+cargo run -- --admire 180    # 3 minutes
+cargo run -- --admire 600    # 10 minutes
+cargo run -- --admire 900    # 15 minutes
+cargo run -- --admire 1200   # 20 minutes
+cargo run -- --admire 3600   # 1 hour
+
 # Admire forever until Ctrl+C:
 cargo run -- --admire 0
 

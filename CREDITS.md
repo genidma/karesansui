@@ -138,3 +138,20 @@
 | | - Added `extract_code_block()` to parse fenced code blocks from the LLM's narrative response |
 | | - If nothing is created, we sit and stare at a blank terminal (as promised) |
 | | - Removed the old action-based `build_creative_composition` prompt entirely |
+
+---
+
+## opencode/big-pickle — Sixth Session (Docker & Bug Fixes)
+
+| | |
+|---|---|
+| **Source** | opencode/big-pickle (via opencode on claude.ai) |
+| **Date** | 2026-07-29 |
+| **Release** | [v1.2](https://github.com/genidma/karesansui/releases/tag/v1.2) |
+| **Changes** | Docker support, bug fixes, and cleanup: |
+| | - Added multi-stage Dockerfile (`rust:alpine` builder → `alpine:3.20` runtime, ~15-20MB final image) |
+| | - Fixed Gridwright `--step` mode: now pauses after each action and accepts steering input from user |
+| | - Enhanced `-i` interactive menu: added step mode toggle prompt |
+| | - Confirmed zero dead-code warnings across all modules |
+| | - Updated README: removed stale turtle/theme references, added admire timing examples |
+| | - Created comprehensive release notes for v1.2 |
