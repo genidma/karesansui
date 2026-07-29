@@ -158,9 +158,7 @@ karesansui is also available as a Docker image — no Rust toolchain required.
 docker build -t karesansui .
 ```
 
-> **Note:** The first build downloads and compiles all Rust dependencies and may take several minutes. Subsequent builds are nearly instant thanks to Docker layer caching.
-
-> **Note:** The final image is ~15-20MB (Alpine base + single static binary).
+> **Note:** The first build downloads `rust:alpine` (~700MB) for the compiler toolchain, then compiles all Rust dependencies — expect several minutes. Docker caches everything after that, so subsequent builds are near-instant. The final tagged runtime image is only ~15-20MB.
 
 ### Run
 
