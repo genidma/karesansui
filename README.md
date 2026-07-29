@@ -148,6 +148,54 @@ Any OpenAI-compatible API can be used by setting `LLM_API_URL` to the desired en
    cargo run
    ```
 
+## Docker
+
+karesansui is also available as a Docker image — no Rust toolchain required.
+
+### Build
+
+```bash
+docker build -t karesansui .
+```
+
+> **Note:** The first build downloads and compiles all Rust dependencies and may take several minutes. Subsequent builds are nearly instant thanks to Docker layer caching.
+
+### Run
+
+The container requires an interactive terminal (`-it`) and your LLM API credentials. Use `--rm` to clean up automatically on exit.
+
+**With a `.env` file** (recommended):
+
+```bash
+# Create your .env from the example first
+cp .env.example .env
+# edit .env with your API key and provider
+docker run -it --rm --env-file .env karesansui
+```
+
+**With inline environment variables:**
+
+```bash
+docker run -it --rm -e LLM_API_KEY=sk-or-... karesansui
+```
+
+### Passing CLI flags
+
+Append flags after `--` so they are passed to the binary rather than to Docker:
+
+```bash
+# Classic theme with a larger canvas
+docker run -it --rm --env-file .env karesansui -- -t classic --width 64 --height 24
+
+# Interactive menu mode
+docker run -it --rm --env-file .env karesansui -- -i
+
+# Dry-run with single-step verification, saving output
+docker run -it --rm --env-file .env karesansui -- --dry-run --step --snapshot /tmp/garden.txt
+```
+
+> Implemented via [#3](https://github.com/genidma/karesansui/issues/3).
+
 ## Configuration
 
 | Env var | Default | Notes |
