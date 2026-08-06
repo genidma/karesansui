@@ -180,6 +180,9 @@ async fn main() -> Result<()> {
     let is_tabula = gardener.is_tabula_rasa();
     let is_wild = gardener.is_wild_zones();
 
+    const MAX_PIECES: u32 = 10;
+    let _piece_num = 0u32;
+
     if theme.contains("Gridwright") {
         let gw_w = if width != 48 || height != 20 { width } else { 16 };
         let gw_h = if width != 48 || height != 20 { height } else { 16 };
@@ -206,9 +209,9 @@ async fn main() -> Result<()> {
         println!("{rendered}");
         return Ok(());
     }
+    for _ in 0..MAX_PIECES {
+        if shutdown.load(Ordering::SeqCst) { break; }
 
-    // Continuous loop: generate → admire → reset → regenerate
-    'session: loop {
         // Display theme intro
         crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All), crossterm::cursor::MoveTo(0, 0))?;
         let theme_label = if is_creative { "🎨 Creative Freedom" } else if is_tabula { "✨ Tabula Rasa" } else if is_wild { "🌊 Wild Zones" } else { "🌿 karesansui" };
@@ -217,8 +220,15 @@ async fn main() -> Result<()> {
         println!("   🐢 {desc}\n");
 
         // Wait for the LLM to compose the full artwork — keep trying until success
-        let actions = loop {
-            if shutdown.load(Ordering::SeqCst) { break 'session; }
+        let mut compose_retries = 0u32;
+        const MAX_COMPOSE_RETRIES: u32 = 5;
+        let mut actions = Vec::new();
+        loop {
+            if shutdown.load(Ordering::SeqCst) { break; }
+            if compose_retries >= MAX_COMPOSE_RETRIES {
+                log::error!("Max compose retries ({MAX_COMPOSE_RETRIES}) exceeded. Skipping to next piece.");
+                break;
+            }
             println!("⏳ Asking the LLM to compose a complete piece...");
             let state = garden.render();
             let start = Instant::now();
@@ -236,20 +246,32 @@ async fn main() -> Result<()> {
             let result = gardener.compose_artwork(&state).await;
             heartbeat.abort();
             match result {
-                Ok(actions) if !actions.is_empty() => {
-                    log::info!("LLM composed {} actions in {:.1}s", actions.len(), start.elapsed().as_secs_f64());
-                    break actions;
+                Ok(a) if !a.is_empty() => {
+                    log::info!("LLM composed {} actions in {:.1}s", a.len(), start.elapsed().as_secs_f64());
+                    actions = a;
+                    break;
                 }
-                Ok(_) => log::warn!("LLM returned empty action list. Retrying..."),
-                Err(e) => log::warn!("LLM composition failed: {e}. Retrying..."),
+                Ok(_) => {
+                    compose_retries += 1;
+                    log::warn!("LLM returned empty action list. Retrying... (attempt {compose_retries}/{MAX_COMPOSE_RETRIES})");
+                }
+                Err(e) => {
+                    compose_retries += 1;
+                    log::warn!("LLM composition failed: {e}. Retrying... (attempt {compose_retries}/{MAX_COMPOSE_RETRIES})");
+                }
             }
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            tokio::time::sleep(Duration::from_secs(5 * compose_retries as u64)).await;
         };
+        
+        if actions.is_empty() {
+            garden.reset();
+            continue;
+        }
 
         // Execute all actions in sequence
         let action_count = actions.len();
         for (i, action) in actions.iter().enumerate() {
-            if shutdown.load(Ordering::SeqCst) { break 'session; }
+            if shutdown.load(Ordering::SeqCst) { break; }
             if matches!(action, Action::Done) { break; }
 
             let header = format!(
@@ -264,7 +286,7 @@ async fn main() -> Result<()> {
                 std::io::stdin().read_line(&mut line).ok();
             }
 
-            garden.execute_action(action, &header, args.no_color).await?;
+            garden.execute_action(&action, &header, args.no_color).await?;
             tokio::time::sleep(anim_delay).await;
         }
 
@@ -276,7 +298,7 @@ async fn main() -> Result<()> {
         garden.turtle_glyph = "💤";
         let admire_secs = if args.admire == 0 { u64::MAX } else { args.admire };
         for remaining in (1..=admire_secs).rev() {
-            if shutdown.load(Ordering::SeqCst) { break 'session; }
+            if shutdown.load(Ordering::SeqCst) { break; }
             let suffix = if args.admire == 0 { "∞ until Ctrl+C" } else { &format!("{remaining}s until next piece") };
             let h = format!("{theme_label} — \"{theme}\" — Complete! 💤 admiring ({suffix})",);
             garden.render_screen(&h, args.no_color)?;

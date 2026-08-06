@@ -5,6 +5,7 @@ use std::time::Duration;
 
 const DEFAULT_API_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_RETRY_ATTEMPTS: u32 = 4;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Deserialize)]
 struct ChatResponse {
@@ -60,6 +61,7 @@ impl LlmClient {
                 { "role": "user", "content": user },
             ],
             "temperature": temperature,
+            "stream": false,
         });
 
         let mut backoff = Duration::from_millis(1000);
@@ -79,7 +81,10 @@ impl LlmClient {
             }
 
             log::info!("Sending LLM request to {} with model {} (attempt {attempt}/{MAX_RETRY_ATTEMPTS})...", self.api_url, self.model);
-            let resp = req.send().await;
+            let resp = req
+                .timeout(REQUEST_TIMEOUT)
+                .send()
+                .await;
 
             let resp = match resp {
                 Ok(r) => r,
