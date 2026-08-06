@@ -223,13 +223,16 @@ async fn main() -> Result<()> {
         let mut compose_retries = 0u32;
         const MAX_COMPOSE_RETRIES: u32 = 5;
         let mut actions = Vec::new();
+        let is_nvidia = gardener.is_nvidia();
         loop {
             if shutdown.load(Ordering::SeqCst) { break; }
             if compose_retries >= MAX_COMPOSE_RETRIES {
                 log::error!("Max compose retries ({MAX_COMPOSE_RETRIES}) exceeded. Skipping to next piece.");
                 break;
             }
-            println!("⏳ Asking the LLM to compose a complete piece...");
+            if !is_nvidia {
+                println!("⏳ Asking the LLM to compose a complete piece...");
+            }
             let state = garden.render();
             let start = Instant::now();
             // Print elapsed every 30s during the LLM call so user knows it's still working

@@ -140,6 +140,7 @@ pub struct Gardener {
     theme_name: String,
     theme_desc: String,
     dry_run: bool,
+    is_nvidia: bool,
 }
 
 fn strip_markdown_fence(s: &str) -> String {
@@ -244,10 +245,11 @@ impl Gardener {
         };
 
         let requested = model.into();
-        let using_openrouter = std::env::var("LLM_API_URL")
+        let api_url = std::env::var("LLM_API_URL")
             .or_else(|_| std::env::var("OPENROUTER_URL"))
-            .map(|u| u.contains("openrouter.ai"))
-            .unwrap_or(true);
+            .unwrap_or_else(|_| "https://openrouter.ai/api/v1/chat/completions".to_string());
+        let using_openrouter = api_url.contains("openrouter.ai");
+        let is_nvidia = api_url.contains("nvidia.com") || api_key.starts_with("nvapi-");
         let model = if !using_openrouter || FREE_MODELS.contains(&requested.as_str()) {
             requested
         } else {
@@ -300,6 +302,7 @@ impl Gardener {
             theme_name: name.to_string(),
             theme_desc: desc.to_string(),
             dry_run,
+            is_nvidia,
         })
     }
 
@@ -317,6 +320,10 @@ impl Gardener {
 
     pub fn is_wild_zones(&self) -> bool {
         self.theme_name.contains("Wild Zones") || self.theme_name.eq_ignore_ascii_case("wild zones")
+    }
+
+    pub fn is_nvidia(&self) -> bool {
+        self.is_nvidia
     }
 
     /// Send a single comprehensive prompt to the LLM asking for a complete artwork.

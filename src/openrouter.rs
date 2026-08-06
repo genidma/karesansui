@@ -47,6 +47,10 @@ impl LlmClient {
         self.api_url.contains("openrouter.ai")
     }
 
+    fn is_nvidia(&self) -> bool {
+        self.api_url.contains("nvidia.com") || self.api_key.starts_with("nvapi-")
+    }
+
     pub async fn call_raw(
         &self,
         system: &str,
@@ -80,7 +84,9 @@ impl LlmClient {
                     .header("X-Title", title);
             }
 
-            log::info!("Sending LLM request to {} with model {} (attempt {attempt}/{MAX_RETRY_ATTEMPTS})...", self.api_url, self.model);
+            if !self.is_nvidia() {
+                log::info!("Sending LLM request to {} with model {} (attempt {attempt}/{MAX_RETRY_ATTEMPTS})...", self.api_url, self.model);
+            }
             let resp = req
                 .timeout(REQUEST_TIMEOUT)
                 .send()
