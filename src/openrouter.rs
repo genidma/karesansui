@@ -38,7 +38,7 @@ impl LlmClient {
         let max_tokens = std::env::var("LLM_MAX_TOKENS")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
-            .unwrap_or(2000);
+            .unwrap_or(4000);
         log::info!("LLM API endpoint: {api_url}, max_tokens: {max_tokens}");
         Self {
             client: reqwest::Client::new(),

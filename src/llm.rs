@@ -57,6 +57,27 @@ fn extract_code_block<'a>(content: &'a str) -> Option<&'a str> {
     found
 }
 
+/// Extract the actual artwork from a model response, robust to reasoning
+/// narration and truncated (unclosed) fenced blocks: always prefer the text
+/// that follows the final fenced-block opener.
+fn extract_art<'a>(content: &'a str) -> &'a str {
+    if let Some(i) = content.rfind("```") {
+        let after = content[i + 3..].strip_prefix('\n').unwrap_or(&content[i + 3..]);
+        let trimmed = after.trim();
+        if !trimmed.is_empty() {
+            return trimmed;
+        }
+        // The final ``` closes a completed block: back up to its opener.
+        if let Some(open) = content[..i].rfind("```") {
+            let body = content[open + 3..i].trim();
+            if !body.is_empty() {
+                return body;
+            }
+        }
+    }
+    content
+}
+
 impl Composer {
     pub fn new(
         model: impl Into<String>,
@@ -129,7 +150,9 @@ impl Composer {
              create anything, that is totally alright also. We will just sit here and stare at a \
              blank terminal. Not being sarcastic.\n\n\
              Please put the artwork in a fenced code block using triple backticks (```) so we can \
-             display it. The code block can contain any emoji, ASCII, or Unicode characters.",
+             display it. The code block can contain any emoji, ASCII, or Unicode characters.\n\n\
+             Output ONLY the fenced code block containing the artwork, with no commentary, \
+             explanation, or thinking before or after it.",
             self.width, self.height,
         );
 
@@ -140,7 +163,7 @@ impl Composer {
             log::info!("LLM creative response received ({} bytes)", content.len());
 
             // Extract code block if present
-            let art = extract_code_block(&content).unwrap_or(&content);
+            let art = extract_art(&content);
             let lines: Vec<String> = art.lines().map(|l| l.to_string()).collect();
 
             if lines.iter().any(|l| l.trim().len() > 1) {
@@ -153,7 +176,7 @@ impl Composer {
 
         // After 3 retries, just show whatever we got
         let content = client.call_raw(&system, &user, 1.0, "karesansui").await?;
-        let art = extract_code_block(&content).unwrap_or(&content);
+        let art = extract_art(&content);
         let lines: Vec<String> = art.lines().map(|l| l.to_string()).collect();
         Ok(vec![Action::DisplayRawArt { lines }])
     }
@@ -204,5 +227,19 @@ mod tests {
     #[test]
     fn extract_code_block_returns_none_without_fence() {
         assert_eq!(extract_code_block("just some +++ art"), None);
+    }
+
+    #[test]
+    fn extract_art_handles_truncated_unclosed_fence() {
+        let content = "Here's a thinking process:\n1. Plan the art.\n```\n /\\\n/__\\";
+        let got = extract_art(content);
+        assert!(got.contains("/__\\"));
+        assert!(!got.contains("thinking"));
+    }
+
+    #[test]
+    fn extract_art_returns_closed_block_when_fence_at_end() {
+        let content = "```\n ## \n##\n```";
+        assert_eq!(extract_art(content), "## \n##");
     }
 }
