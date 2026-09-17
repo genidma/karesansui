@@ -1,25 +1,58 @@
 use anyhow::{Context, Result};
+use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::json;
 use std::time::Duration;
 
 const DEFAULT_API_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_RETRY_ATTEMPTS: u32 = 4;
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 
 #[derive(Debug, Deserialize)]
-struct ChatResponse {
-    choices: Vec<Choice>,
+struct ChatChunk {
+    #[serde(default)]
+    choices: Vec<ChunkChoice>,
 }
 
 #[derive(Debug, Deserialize)]
-struct Choice {
-    message: ChatMessage,
+struct ChunkChoice {
+    #[serde(default)]
+    delta: Delta,
 }
 
-#[derive(Debug, Deserialize)]
-struct ChatMessage {
-    content: String,
+#[derive(Debug, Deserialize, Default)]
+struct Delta {
+    #[serde(default)]
+    content: Option<String>,
+}
+
+/// A parsed SSE line from an OpenAI-compatible streaming response.
+enum SseEvent {
+    Ignore,
+    Done,
+    Text(String),
+}
+
+fn parse_sse_line(line: &str) -> SseEvent {
+    let line = line.trim();
+    let Some(payload) = line.strip_prefix("data:") else {
+        return SseEvent::Ignore;
+    };
+    let payload = payload.trim();
+    if payload == "[DONE]" {
+        return SseEvent::Done;
+    }
+    match serde_json::from_str::<ChatChunk>(payload) {
+        Ok(chunk) => chunk
+            .choices
+            .into_iter()
+            .next()
+            .and_then(|c| c.delta.content)
+            .map(SseEvent::Text)
+            .unwrap_or(SseEvent::Ignore),
+        Err(_) => SseEvent::Ignore,
+    }
 }
 
 pub struct LlmClient {
@@ -41,7 +74,10 @@ impl LlmClient {
             .unwrap_or(4000);
         log::info!("LLM API endpoint: {api_url}, max_tokens: {max_tokens}");
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .connect_timeout(CONNECT_TIMEOUT)
+                .build()
+                .unwrap_or_default(),
             api_key,
             model,
             api_url,
@@ -72,7 +108,7 @@ impl LlmClient {
                 { "role": "user", "content": user },
             ],
             "temperature": temperature,
-            "stream": false,
+            "stream": true,
             "max_tokens": self.max_tokens,
         });
         if is_nvidia {
@@ -100,10 +136,7 @@ impl LlmClient {
             if !self.is_nvidia() {
                 log::info!("Sending LLM request to {} with model {} (attempt {attempt}/{MAX_RETRY_ATTEMPTS})...", self.api_url, self.model);
             }
-            let resp = req
-                .timeout(REQUEST_TIMEOUT)
-                .send()
-                .await;
+            let resp = req.send().await;
 
             let resp = match resp {
                 Ok(r) => r,
@@ -140,19 +173,68 @@ impl LlmClient {
                 return Err(anyhow::anyhow!("LLM API error (status {status}): {err_body}"));
             }
 
-            let chat_resp: ChatResponse = resp.json().await.context("Failed to parse LLM JSON response")?;
-
-            let content = chat_resp
-                .choices
-                .into_iter()
-                .next()
-                .map(|c| c.message.content)
-                .ok_or_else(|| anyhow::anyhow!("No choices returned from LLM API"))?;
-
-            return Ok(strip_markdown_fence(&content));
+            // Stream the response so a slow/queued endpoint keeps the connection
+            // warm and never trips a whole-response timeout.
+            match self.read_stream(resp).await {
+                Ok(content) if !content.trim().is_empty() => {
+                    return Ok(strip_markdown_fence(&content));
+                }
+                Ok(_) => {
+                    if attempt < MAX_RETRY_ATTEMPTS {
+                        log::warn!("LLM returned an empty stream (attempt {attempt}/{MAX_RETRY_ATTEMPTS}). Retrying in {backoff:?}...");
+                        tokio::time::sleep(backoff).await;
+                        backoff *= 2;
+                        continue;
+                    }
+                    return Err(anyhow::anyhow!("LLM returned an empty stream after {MAX_RETRY_ATTEMPTS} attempts"));
+                }
+                Err(e) => {
+                    if attempt < MAX_RETRY_ATTEMPTS {
+                        log::warn!("Stream error (attempt {attempt}/{MAX_RETRY_ATTEMPTS}): {e}. Retrying in {backoff:?}...");
+                        tokio::time::sleep(backoff).await;
+                        backoff *= 2;
+                        continue;
+                    }
+                    return Err(anyhow::anyhow!("LLM stream failed after {MAX_RETRY_ATTEMPTS} attempts: {e}"));
+                }
+            }
         }
 
         Err(anyhow::anyhow!("Exceeded maximum retry attempts"))
+    }
+
+    /// Consume an OpenAI-compatible SSE stream, accumulating assistant text.
+    /// A stalled stream (no bytes for `STREAM_IDLE_TIMEOUT`) is treated as an
+    /// error so the caller can retry instead of hanging indefinitely.
+    async fn read_stream(&self, resp: reqwest::Response) -> Result<String> {
+        let mut stream = resp.bytes_stream();
+        let mut buf = String::new();
+        let mut content = String::new();
+        let mut bytes = 0usize;
+        loop {
+            let next = tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next())
+                .await
+                .map_err(|_| anyhow::anyhow!("stream idle for {STREAM_IDLE_TIMEOUT:?}"))?;
+            let chunk = match next {
+                Some(c) => c.context("stream read error")?,
+                None => break,
+            };
+            bytes += chunk.len();
+            buf.push_str(&String::from_utf8_lossy(&chunk));
+            while let Some(pos) = buf.find('\n') {
+                let line: String = buf.drain(..=pos).collect();
+                match parse_sse_line(&line) {
+                    SseEvent::Text(t) => content.push_str(&t),
+                    SseEvent::Done => {
+                        log::info!("LLM creative response received ({bytes} bytes, streamed)");
+                        return Ok(content);
+                    }
+                    SseEvent::Ignore => {}
+                }
+            }
+        }
+        log::info!("LLM creative response received ({bytes} bytes, streamed)");
+        Ok(content)
     }
 }
 
@@ -180,5 +262,18 @@ mod tests {
         assert_eq!(strip_markdown_fence("```\n{\"a\":1}\n```"), "{\"a\":1}");
         assert_eq!(strip_markdown_fence("{\"a\":1}"), "{\"a\":1}");
         assert_eq!(strip_markdown_fence("```json\n{\"a\":1}"), "{\"a\":1}");
+    }
+
+    #[test]
+    fn test_parse_sse_line() {
+        let data = r#"data: {"choices":[{"delta":{"content":"hi"}}]}"#;
+        assert!(matches!(parse_sse_line(data), SseEvent::Text(t) if t == "hi"));
+        assert!(matches!(parse_sse_line("data: [DONE]"), SseEvent::Done));
+        assert!(matches!(parse_sse_line(": OPENROUTER PROCESSING"), SseEvent::Ignore));
+        assert!(matches!(parse_sse_line("data: not json"), SseEvent::Ignore));
+        assert!(matches!(
+            parse_sse_line(r#"data: {"choices":[{"delta":{}}]}"#),
+            SseEvent::Ignore
+        ));
     }
 }
