@@ -85,14 +85,21 @@ Any OpenAI-compatible API can be used by setting `LLM_API_URL` to the desired en
    # NVIDIA NIM (recommended):
    LLM_API_KEY=nvapi-...
    LLM_API_URL=https://integrate.api.nvidia.com/v1/chat/completions
-   LLM_MODEL=nvidia/nemotron-3-nano-30b-a3b
+   LLM_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b
 
    # OpenRouter (fallback):
    # LLM_API_KEY=sk-or-...
    # LLM_API_URL defaults to OpenRouter
    # LLM_MODEL=tencent/hy3:free
    ```
-   (`.env` is gitignored.)
+   (.env is gitignored.)
+
+   > **NVIDIA free-tier models** — all NIM endpoints use the same single API key (create one at
+   > https://build.nvidia.com/settings). `nvidia/nemotron-3.5-lightning-30b-a3b` is the currently
+   > recommended free model: fast and reliably returns fenced ASCII art. Other tested free options:
+   > `nvidia/nemotron-3-super-120b-a12b` (larger, slower, prone to 503 overload), `z-ai/glm-5.3-flash`
+   > (excellent quality but slow on the busy free tier), `openai/gpt-oss-20b` and
+   > `deepseek-ai/deepseek-v4-flash-0731` (may time out during peak load).
 4. Build:
    ```bash
    cargo build
