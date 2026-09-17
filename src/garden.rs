@@ -538,9 +538,12 @@ impl Garden {
     /// Uses raw_art_lines when available, otherwise renders the garden grid.
     pub fn render_screen(&self, header: &str, no_color: bool) -> Result<()> {
         use crossterm::{cursor, terminal};
-        use std::io::Write;
+        use std::io::{IsTerminal, Write};
+        let tty = std::io::stdout().is_terminal();
         let mut stdout = std::io::stdout();
-        crossterm::queue!(stdout, cursor::Hide, cursor::MoveTo(0, 0), terminal::Clear(terminal::ClearType::All))?;
+        if tty {
+            crossterm::queue!(stdout, cursor::Hide, cursor::MoveTo(0, 0), terminal::Clear(terminal::ClearType::All))?;
+        }
         let rendered = if let Some(ref lines) = self.raw_art_lines {
             lines.join("\n")
         } else if no_color {

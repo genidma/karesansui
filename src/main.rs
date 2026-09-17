@@ -3,6 +3,7 @@ mod llm;
 mod openrouter;
 mod vec;
 
+use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -53,7 +54,9 @@ pub struct CliArgs {
 struct CleanExit;
 impl Drop for CleanExit {
     fn drop(&mut self) {
-        let _ = crossterm::execute!(std::io::stdout(), crossterm::cursor::Show);
+        if std::io::stdout().is_terminal() {
+            let _ = crossterm::execute!(std::io::stdout(), crossterm::cursor::Show);
+        }
     }
 }
 
@@ -66,7 +69,10 @@ async fn main() -> Result<()> {
     let args = CliArgs::parse();
 
     let _clean_exit = CleanExit;
-    crossterm::execute!(std::io::stdout(), crossterm::cursor::Hide)?;
+    let is_tty = std::io::stdout().is_terminal();
+    if is_tty {
+        crossterm::execute!(std::io::stdout(), crossterm::cursor::Hide)?;
+    }
 
     let model = std::env::var("LLM_MODEL")
         .or_else(|_| std::env::var("OPENROUTER_MODEL"))
@@ -99,7 +105,11 @@ async fn main() -> Result<()> {
     for _ in 0..MAX_PIECES {
         if shutdown.load(Ordering::SeqCst) { break; }
 
+        if is_tty {
+    if is_tty {
         crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All), crossterm::cursor::MoveTo(0, 0))?;
+    }
+        }
         let theme_label = "🎨 Creative Freedom";
         println!("{theme_label}\n");
         println!("   ✨ The LLM is composing a complete ASCII art piece...\n");
@@ -210,9 +220,11 @@ async fn main() -> Result<()> {
         let admire_secs = if args.admire == 0 { u64::MAX } else { args.admire };
         for remaining in (1..=admire_secs).rev() {
             if shutdown.load(Ordering::SeqCst) { break; }
-            let suffix = if args.admire == 0 { "∞ until Ctrl+C" } else { &format!("{remaining}s until next piece") };
-            let h = format!("{theme_label} — Complete! 💤 admiring ({suffix})",);
-            garden.render_screen(&h, args.no_color)?;
+            if is_tty {
+                let suffix = if args.admire == 0 { "∞ until Ctrl+C" } else { &format!("{remaining}s until next piece") };
+                let h = format!("{theme_label} — Complete! 💤 admiring ({suffix})",);
+                garden.render_screen(&h, args.no_color)?;
+            }
             tokio::select! {
                 _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
                 _ = cancel_rx.changed() => {
@@ -226,7 +238,9 @@ async fn main() -> Result<()> {
         garden.reset();
     }
 
-    crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All), crossterm::cursor::MoveTo(0, 0))?;
+    if is_tty {
+        crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All), crossterm::cursor::MoveTo(0, 0))?;
+    }
     let farewell = if interrupted {
         "🌿 karesansui — Interrupted. See you next time!"
     } else {
