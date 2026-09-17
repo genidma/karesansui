@@ -76,13 +76,19 @@ async fn main() -> Result<()> {
     let height = args.height;
 
     let shutdown = Arc::new(AtomicBool::new(false));
+    let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
     {
         let shutdown_signal = shutdown.clone();
+        let cancel_tx = cancel_tx.clone();
         tokio::spawn(async move {
-            signal::ctrl_c().await.ok();
-            shutdown_signal.store(true, Ordering::SeqCst);
+            loop {
+                signal::ctrl_c().await.ok();
+                shutdown_signal.store(true, Ordering::SeqCst);
+                let _ = cancel_tx.send(true);
+            }
         });
     }
+    let mut interrupted = false;
 
     let mut garden = Garden::new(width, height);
     let composer = Composer::new(&model, width, height, args.dry_run)?;
@@ -123,24 +129,42 @@ async fn main() -> Result<()> {
                     }
                 })
             };
-            let result = composer.compose_artwork().await;
-            heartbeat.abort();
-            match result {
-                Ok(a) if !a.is_empty() => {
-                    log::info!("LLM composed {} actions in {:.1}s", a.len(), start.elapsed().as_secs_f64());
-                    actions = a;
+            let compose = composer.compose_artwork();
+            tokio::pin!(compose);
+            tokio::select! {
+                result = &mut compose => {
+                    heartbeat.abort();
+                    match result {
+                        Ok(a) if !a.is_empty() => {
+                            log::info!("LLM composed {} actions in {:.1}s", a.len(), start.elapsed().as_secs_f64());
+                            actions = a;
+                            break;
+                        }
+                        Ok(_) => {
+                            compose_retries += 1;
+                            log::warn!("LLM returned empty action list. Retrying... (attempt {compose_retries}/{MAX_COMPOSE_RETRIES})");
+                        }
+                        Err(e) => {
+                            compose_retries += 1;
+                            log::warn!("LLM composition failed: {e}. Retrying... (attempt {compose_retries}/{MAX_COMPOSE_RETRIES})");
+                        }
+                    }
+                }
+                _ = cancel_rx.changed() => {
+                    heartbeat.abort();
+                    log::info!("Ctrl+C received — aborting LLM composition.");
+                    interrupted = true;
                     break;
                 }
-                Ok(_) => {
-                    compose_retries += 1;
-                    log::warn!("LLM returned empty action list. Retrying... (attempt {compose_retries}/{MAX_COMPOSE_RETRIES})");
-                }
-                Err(e) => {
-                    compose_retries += 1;
-                    log::warn!("LLM composition failed: {e}. Retrying... (attempt {compose_retries}/{MAX_COMPOSE_RETRIES})");
+            }
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(5 * compose_retries as u64)) => {}
+                _ = cancel_rx.changed() => {
+                    log::info!("Ctrl+C received — skipping retry backoff.");
+                    interrupted = true;
+                    break;
                 }
             }
-            tokio::time::sleep(std::time::Duration::from_secs(5 * compose_retries as u64)).await;
         };
 
         if actions.is_empty() {
@@ -166,7 +190,16 @@ async fn main() -> Result<()> {
                 std::io::stdin().read_line(&mut line).ok();
             }
 
-            garden.execute_action(&action, &header, args.no_color).await?;
+            let exec = garden.execute_action(action, &header, args.no_color);
+            tokio::pin!(exec);
+            tokio::select! {
+                r = &mut exec => { r?; }
+                _ = cancel_rx.changed() => {
+                    log::info!("Ctrl+C received — stopping action execution.");
+                    interrupted = true;
+                    break;
+                }
+            }
         }
 
         if let Some(ref snapshot_path) = args.snapshot {
@@ -180,7 +213,13 @@ async fn main() -> Result<()> {
             let suffix = if args.admire == 0 { "∞ until Ctrl+C" } else { &format!("{remaining}s until next piece") };
             let h = format!("{theme_label} — Complete! 💤 admiring ({suffix})",);
             garden.render_screen(&h, args.no_color)?;
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
+                _ = cancel_rx.changed() => {
+                    interrupted = true;
+                    break;
+                }
+            }
         }
 
         // Reset canvas for next piece
@@ -188,6 +227,11 @@ async fn main() -> Result<()> {
     }
 
     crossterm::execute!(std::io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All), crossterm::cursor::MoveTo(0, 0))?;
-    println!("🌿 karesansui — Interrupted. See you next time!");
+    let farewell = if interrupted {
+        "🌿 karesansui — Interrupted. See you next time!"
+    } else {
+        "🌿 karesansui — Done. See you next time!"
+    };
+    println!("{farewell}");
     Ok(())
 }
