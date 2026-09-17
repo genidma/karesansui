@@ -1,9 +1,8 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::time::Duration;
 
-/// A single gardener action returned by the LLM.
+/// A single drawing action returned by the LLM.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Action {
@@ -41,24 +40,24 @@ pub enum Action {
     DrawBorder,
     /// Signal that the garden composition is complete.
     Done,
-    /// Place a multi-cell glyph pattern (for enhanced Tabula Rasa and Matrix ASCII)
+    /// Place a multi-cell glyph pattern.
     PlaceMultiCellGlyph {
         anchor_x: usize,
         anchor_y: usize,
         glyphs: Vec<(usize, usize, String)>, // (dx, dy, glyph)
     },
-    /// Draw a flow line with proportional spacing (for Enhanced Tabula Rasa)
+    /// Draw a flow line with proportional spacing.
     DrawFlowLine {
         points: Vec<(usize, usize)>,
         glyph: String,
     },
-    /// Apply glitch escape sequences and corruption (for Glitch ASCII)
+    /// Apply glitch escape sequences and corruption.
     ApplyGlitchFilter {
         x: usize,
         y: usize,
         filter_type: GlitchFilterType,
     },
-    /// Place a glyph with custom blending (for Matrix ASCII)
+    /// Place a glyph with custom blending.
     PlaceBlendedGlyph {
         x: usize,
         y: usize,
@@ -66,7 +65,7 @@ pub enum Action {
         blend_mode: BlendMode,
         opacity: f32,
     },
-    /// Display raw ASCII art lines from the LLM's own creation (Creative Freedom v2)
+    /// Display raw ASCII art lines from the LLM's own creation.
     #[serde(skip)]
     DisplayRawArt { lines: Vec<String> },
 }
@@ -83,36 +82,7 @@ pub const GRAVEL: &str = "··";
 pub const FLOWER: &str = "🌸";
 pub const LANTERN: &str = "🏮";
 
-/// Various ASCII art theme modes for flexible glyph rendering
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum AsciiTheme {
-    Classic,          // Standard 2-column ASCII
-    TabulaRasa,       // Pure ASCII, no restrictions
-    WildZones,        // Unicode freedom, no borders
-    EnhancedTabulaRasa, // Enhanced ASCII with proportional placement
-    ChaoticASCII,     // Variable width, overlapping, absolute freedom
-    MatrixASCII,      // Overlapping, layered glyphs
-    GlitchASCII,      // Unicode chaos, escape sequences
-    Gridwright,       // Pixel-perfect grid art (existing)
-}
-
-impl AsciiTheme {
-    pub fn max_glyph_width(&self) -> usize {
-        match self {
-            AsciiTheme::Classic => 2,
-            AsciiTheme::TabulaRasa => 2,
-            AsciiTheme::WildZones => 2,
-            AsciiTheme::EnhancedTabulaRasa => 8,
-            AsciiTheme::ChaoticASCII => 4,
-            AsciiTheme::MatrixASCII => 4,
-            AsciiTheme::GlitchASCII => 8,
-            AsciiTheme::Gridwright => 1,
-        }
-    }
-
-}
-
-/// Blend modes for Matrix ASCII overlapping glyphs
+/// Blend modes for overlapping glyphs
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum BlendMode {
     Replace,     // Standard overwrite
@@ -123,7 +93,7 @@ pub enum BlendMode {
     Custom,      // Custom function
 }
 
-/// Glitch filter types for Glitch ASCII
+/// Glitch filter types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum GlitchFilterType {
     CharSwap,      // Swap characters randomly
@@ -132,15 +102,6 @@ pub enum GlitchFilterType {
     ColorInvert,   // Invert color if supported
     GlitchBurst,   // Random corruption bursts
     EscapeSequence,// Apply escape sequences
-}
-
-/// A glyph layer for overlapping ASCII art
-#[derive(Debug, Clone, PartialEq)]
-pub struct LayeredGlyph {
-    pub content: String,
-    pub z_index: i32,
-    pub blend_mode: BlendMode,
-    pub opacity: f32,
 }
 
 // Mandala & Fractal Minimalist Glyphs (2 columns wide)
@@ -247,17 +208,9 @@ pub struct Garden {
     pub width: usize,
     pub height: usize,
     pub grid: Vec<Vec<String>>,
-    /// Current position of the gardener turtle (x, y).
-    pub turtle_pos: Option<(usize, usize)>,
-    /// Glyph for the turtle (e.g. "🐢" when walking/building, "💤" when resting).
-    pub turtle_glyph: &'static str,
     /// The aesthetic border pattern framing this session's garden.
     pub border_pattern: BorderPattern,
-    /// Current ASCII theme affecting rendering behavior
-    pub ascii_theme: AsciiTheme,
-    /// Layered glyph support for Matrix ASCII
-    pub glyph_layers: HashMap<(usize, usize), Vec<LayeredGlyph>>,
-    /// Raw art lines for Creative Freedom display (bypasses grid)
+    /// Raw art lines for direct display (bypasses grid)
     pub raw_art_lines: Option<Vec<String>>,
 }
 
@@ -271,98 +224,17 @@ impl Garden {
             width,
             height,
             grid,
-            turtle_pos: Some((1, 1)),
-            turtle_glyph: "🐢",
             border_pattern,
-            ascii_theme: AsciiTheme::Classic,
-            glyph_layers: HashMap::new(),
             raw_art_lines: None,
         }
     }
 
-    /// Place a glyph using theme-aware rendering
+    /// Place a glyph into a single 2-column cell.
     pub fn place_glyph(&mut self, x: usize, y: usize, glyph: &str) {
         if y >= self.height || x >= self.width {
             return;
         }
-        match self.ascii_theme {
-            AsciiTheme::Classic | AsciiTheme::TabulaRasa | AsciiTheme::WildZones => {
-                self.grid[y][x] = self.format_2col_glyph(glyph);
-            }
-            AsciiTheme::Gridwright => {
-                // Gridwright uses its own canvas, not Garden
-            }
-            AsciiTheme::EnhancedTabulaRasa => {
-                self.place_ascii_enhanced(x, y, glyph);
-            }
-            AsciiTheme::ChaoticASCII => {
-                self.place_chaotic_glyph(x, y, glyph);
-            }
-            AsciiTheme::MatrixASCII => {
-                let content = self.format_2col_glyph(glyph);
-                let layer = LayeredGlyph {
-                    content: content.clone(),
-                    z_index: 0,
-                    blend_mode: BlendMode::Replace,
-                    opacity: 1.0,
-                };
-                self.glyph_layers.entry((x, y)).or_insert_with(Vec::new).push(layer);
-                self.grid[y][x] = content;
-            }
-            AsciiTheme::GlitchASCII => {
-                let corrupted = self.apply_glitch_filter(glyph);
-                self.grid[y][x] = self.format_2col_glyph(&corrupted);
-            }
-        }
-    }
-
-    fn place_ascii_enhanced(&mut self, x: usize, y: usize, glyph: &str) {
-        let mut clean = String::new();
-        for ch in glyph.chars() {
-            if ch.is_ascii() && ch != '\n' && ch != '\r' && !ch.is_control() {
-                clean.push(ch);
-            }
-        }
-        let max_width = self.ascii_theme.max_glyph_width();
-        let display_width = clean.len().min(max_width);
-        let mut display = String::new();
-        for i in 0..display_width {
-            display.push(clean.chars().nth(i).unwrap_or_default());
-            if i < display_width - 1 {
-                display.push(' ');
-            }
-        }
-        self.grid[y][x] = display;
-    }
-
-    fn place_chaotic_glyph(&mut self, x: usize, y: usize, glyph: &str) {
-        let mut display = String::new();
-        for ch in glyph.chars() {
-            if ch.is_ascii() || !ch.is_control() {
-                display.push(ch);
-            }
-            if display.len() < self.ascii_theme.max_glyph_width() {
-                display.push(' ');
-            }
-        }
-        self.grid[y][x] = display;
-    }
-
-    fn apply_glitch_filter(&self, glyph: &str) -> String {
-        let mut result = String::new();
-        for ch in glyph.chars() {
-            if ch.is_ascii() {
-                let r: f32 = rand::random_range(0.0..1.0);
-                if r < 0.1 {
-                    result.push('?');
-                } else {
-                    result.push(ch);
-                }
-            } else {
-                result.push(ch);
-            }
-        }
-        result
+        self.grid[y][x] = self.format_2col_glyph(glyph);
     }
 
     pub fn is_empty(&self, x: usize, y: usize) -> bool {
@@ -615,21 +487,14 @@ impl Garden {
         }
     }
 
-    /// Render the garden to a string for terminal display, showing the turtle
-    /// right at its current location.
+    /// Render the garden to a string for terminal display.
     pub fn render(&self) -> String {
         if let Some(ref lines) = self.raw_art_lines {
             return lines.join("\n");
         }
         let mut out = String::new();
-        for (y, row) in self.grid.iter().enumerate() {
-            for (x, cell) in row.iter().enumerate() {
-                if let Some((tx, ty)) = self.turtle_pos {
-                    if x == tx && y == ty {
-                        out.push_str(self.turtle_glyph);
-                        continue;
-                    }
-                }
+        for row in self.grid.iter() {
+            for cell in row.iter() {
                 out.push_str(cell);
             }
             out.push('\n');
@@ -648,12 +513,6 @@ impl Garden {
         let mut out = String::new();
         for (y, row) in self.grid.iter().enumerate() {
             for (x, cell) in row.iter().enumerate() {
-                if let Some((tx, ty)) = self.turtle_pos {
-                    if x == tx && y == ty {
-                        out.push_str(&self.turtle_glyph.yellow().bold().to_string());
-                        continue;
-                    }
-                }
                 let styled = match cell.as_str() {
                     ROCK_S | ROCK_M | ROCK_L => cell.as_str().dark_grey().bold().to_string(),
                     MOSS => cell.as_str().green().to_string(),
@@ -676,7 +535,7 @@ impl Garden {
     }
 
     /// Render the current garden state to screen with header.
-    /// Uses raw_art_lines when available (Creative Freedom mode), otherwise renders the garden grid.
+    /// Uses raw_art_lines when available, otherwise renders the garden grid.
     pub fn render_screen(&self, header: &str, no_color: bool) -> Result<()> {
         use crossterm::{cursor, terminal};
         use std::io::Write;
@@ -695,36 +554,12 @@ impl Garden {
         Ok(())
     }
 
-    /// Reset the garden for a new piece: clear grid, reset turtle, pick new border pattern.
+    /// Reset the garden for a new piece: clear grid, pick new border pattern.
     pub fn reset(&mut self) {
         self.grid = vec![vec![EMPTY.to_string(); self.width]; self.height];
-        self.turtle_pos = Some((1, 1));
-        self.turtle_glyph = "🐢";
         use rand::Rng;
         self.border_pattern = BORDER_PATTERNS[rand::rng().random_range(0..BORDER_PATTERNS.len())].clone();
-        self.glyph_layers.clear();
         self.raw_art_lines = None;
-    }
-
-    /// Animate the turtle walking step-by-step to (dest_x, dest_y).
-    pub async fn animate_walk(&mut self, dest_x: usize, dest_y: usize, header: &str, no_color: bool) -> Result<()> {
-        let (mut tx, mut ty) = self.turtle_pos.unwrap_or((1, 1));
-        while tx != dest_x || ty != dest_y {
-            if tx < dest_x {
-                tx += 1;
-            } else if tx > dest_x {
-                tx -= 1;
-            }
-            if ty < dest_y {
-                ty += 1;
-            } else if ty > dest_y {
-                ty -= 1;
-            }
-            self.turtle_pos = Some((tx, ty));
-            self.render_screen(header, no_color)?;
-            tokio::time::sleep(Duration::from_millis(150)).await;
-        }
-        Ok(())
     }
 
     /// Execute an action with full animation and rendering. Returns true if action was Done.
@@ -735,68 +570,56 @@ impl Garden {
             Action::DrawBorder => {
                 for x in 0..w {
                     self.draw_border_at(x, 0);
-                    self.turtle_pos = Some((x, 0));
                     self.render_screen(header, no_color)?;
                     tokio::time::sleep(Duration::from_millis(30)).await;
                 }
                 for y in 0..h {
                     self.draw_border_at(w - 1, y);
-                    self.turtle_pos = Some((w - 1, y));
                     self.render_screen(header, no_color)?;
                     tokio::time::sleep(Duration::from_millis(30)).await;
                 }
                 for x in (0..w).rev() {
                     self.draw_border_at(x, h - 1);
-                    self.turtle_pos = Some((x, h - 1));
                     self.render_screen(header, no_color)?;
                     tokio::time::sleep(Duration::from_millis(30)).await;
                 }
                 for y in (0..h).rev() {
                     self.draw_border_at(0, y);
-                    self.turtle_pos = Some((0, y));
                     self.render_screen(header, no_color)?;
                     tokio::time::sleep(Duration::from_millis(30)).await;
                 }
-                self.turtle_pos = Some((1, 1));
             }
             Action::PlaceRock { x, y, size } => {
-                self.animate_walk(*x, *y, header, no_color).await?;
                 self.place_rock(*x, *y, *size);
                 self.render_screen(header, no_color)?;
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
             Action::PlaceMoss { x, y } => {
-                self.animate_walk(*x, *y, header, no_color).await?;
                 self.place_moss(*x, *y);
                 self.render_screen(header, no_color)?;
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
             Action::PlaceFlower { x, y } => {
-                self.animate_walk(*x, *y, header, no_color).await?;
                 self.place_flower(*x, *y);
                 self.render_screen(header, no_color)?;
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
             Action::PlaceLantern { x, y } => {
-                self.animate_walk(*x, *y, header, no_color).await?;
                 self.place_lantern(*x, *y);
                 self.render_screen(header, no_color)?;
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
             Action::PlaceMandala { x, y, style } => {
-                self.animate_walk(*x, *y, header, no_color).await?;
                 self.place_mandala(*x, *y, *style);
                 self.render_screen(header, no_color)?;
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
             Action::PlaceAscii { x, y, glyph } => {
-                self.animate_walk(*x, *y, header, no_color).await?;
                 self.place_ascii(*x, *y, glyph);
                 self.render_screen(header, no_color)?;
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
             Action::DrawAsciiLine { y, x1, x2, glyph } => {
-                self.animate_walk(*x1, *y, header, no_color).await?;
                 let (a, b) = if x1 <= x2 { (*x1, *x2) } else { (*x2, *x1) };
                 let step_range: Vec<usize> = if x1 <= x2 {
                     (a..=b.min(w.saturating_sub(1))).collect()
@@ -804,20 +627,17 @@ impl Garden {
                     (a..=b.min(w.saturating_sub(1))).rev().collect()
                 };
                 for x in step_range {
-                    self.turtle_pos = Some((x, *y));
                     self.place_ascii(x, *y, glyph);
                     self.render_screen(header, no_color)?;
                     tokio::time::sleep(Duration::from_millis(120)).await;
                 }
             }
             Action::PlaceGlyph { x, y, glyph } => {
-                self.animate_walk(*x, *y, header, no_color).await?;
                 self.place_glyph(*x, *y, glyph);
                 self.render_screen(header, no_color)?;
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
             Action::DrawLine { y, x1, x2, glyph } => {
-                self.animate_walk(*x1, *y, header, no_color).await?;
                 let (a, b) = if x1 <= x2 { (*x1, *x2) } else { (*x2, *x1) };
                 let step_range: Vec<usize> = if x1 <= x2 {
                     (a..=b.min(w.saturating_sub(1))).collect()
@@ -825,7 +645,6 @@ impl Garden {
                     (a..=b.min(w.saturating_sub(1))).rev().collect()
                 };
                 for x in step_range {
-                    self.turtle_pos = Some((x, *y));
                     self.place_glyph(x, *y, glyph);
                     self.render_screen(header, no_color)?;
                     tokio::time::sleep(Duration::from_millis(120)).await;
@@ -833,11 +652,7 @@ impl Garden {
             }
             Action::DrawRing { cx, cy, radius, glyph } => {
                 let pts = self.ring_points(*cx, *cy, *radius);
-                if let Some(&(fx, fy)) = pts.first() {
-                    self.animate_walk(fx, fy, header, no_color).await?;
-                }
                 for (x, y) in pts {
-                    self.turtle_pos = Some((x, y));
                     self.place_glyph(x, y, glyph);
                     self.render_screen(header, no_color)?;
                     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -846,10 +661,8 @@ impl Garden {
             Action::FillBox { x1, y1, x2, y2, glyph } => {
                 let (min_x, max_x) = if x1 <= x2 { (*x1, *x2) } else { (*x2, *x1) };
                 let (min_y, max_y) = if y1 <= y2 { (*y1, *y2) } else { (*y2, *y1) };
-                self.animate_walk(min_x, min_y, header, no_color).await?;
                 for y in min_y..=max_y.min(h.saturating_sub(1)) {
                     for x in min_x..=max_x.min(w.saturating_sub(1)) {
-                        self.turtle_pos = Some((x, y));
                         self.place_glyph(x, y, glyph);
                         self.render_screen(header, no_color)?;
                         tokio::time::sleep(Duration::from_millis(60)).await;
@@ -857,13 +670,11 @@ impl Garden {
                 }
             }
             Action::ClearCell { x, y } => {
-                self.animate_walk(*x, *y, header, no_color).await?;
                 self.clear_cell(*x, *y);
                 self.render_screen(header, no_color)?;
                 tokio::time::sleep(Duration::from_millis(300)).await;
             }
             Action::RakeLine { y, x1, x2 } => {
-                self.animate_walk(*x1, *y, header, no_color).await?;
                 let (a, b) = if x1 <= x2 { (*x1, *x2) } else { (*x2, *x1) };
                 let step_range: Vec<usize> = if x1 <= x2 {
                     (a..=b.min(w.saturating_sub(1))).collect()
@@ -871,7 +682,6 @@ impl Garden {
                     (a..=b.min(w.saturating_sub(1))).rev().collect()
                 };
                 for x in step_range {
-                    self.turtle_pos = Some((x, *y));
                     if self.is_empty(x, *y) {
                         self.grid[*y][x] = RAKED.to_string();
                     }
@@ -881,11 +691,7 @@ impl Garden {
             }
             Action::RakeRing { cx, cy, radius } => {
                 let pts = self.ring_points(*cx, *cy, *radius);
-                if let Some(first) = pts.first() {
-                    self.animate_walk(first.0, first.1, header, no_color).await?;
-                }
                 for (x, y) in pts {
-                    self.turtle_pos = Some((x, y));
                     if self.is_empty(x, y) {
                         self.grid[y][x] = RAKED.to_string();
                     }
@@ -894,7 +700,6 @@ impl Garden {
                 }
             }
             Action::PlaceGravel { y, x1, x2 } => {
-                self.animate_walk(*x1, *y, header, no_color).await?;
                 let (a, b) = if x1 <= x2 { (*x1, *x2) } else { (*x2, *x1) };
                 let step_range: Vec<usize> = if x1 <= x2 {
                     (a..=b.min(w.saturating_sub(1))).collect()
@@ -902,7 +707,6 @@ impl Garden {
                     (a..=b.min(w.saturating_sub(1))).rev().collect()
                 };
                 for x in step_range {
-                    self.turtle_pos = Some((x, *y));
                     if self.is_empty(x, *y) {
                         self.grid[*y][x] = GRAVEL.to_string();
                     }
@@ -919,14 +723,12 @@ impl Garden {
                     let y = anchor_y.saturating_add(*dy);
                     self.place_glyph(x, y, glyph);
                 }
-                self.turtle_pos = Some((*anchor_x, *anchor_y));
                 self.render_screen(header, no_color)?;
                 tokio::time::sleep(Duration::from_millis(60)).await;
             }
             Action::DrawFlowLine { points, glyph } => {
                 for (x, y) in points {
                     self.place_glyph(*x, *y, glyph);
-                    self.turtle_pos = Some((*x, *y));
                     self.render_screen(header, no_color)?;
                     tokio::time::sleep(Duration::from_millis(30)).await;
                 }
@@ -935,13 +737,11 @@ impl Garden {
                 let cell = self.grid[*y][*x].clone();
                 let corrupted = format!("?{}", cell.chars().next().unwrap_or(' '));
                 self.place_glyph(*x, *y, &corrupted);
-                self.turtle_pos = Some((*x, *y));
                 self.render_screen(header, no_color)?;
                 tokio::time::sleep(Duration::from_millis(40)).await;
             }
             Action::PlaceBlendedGlyph { x, y, glyph, .. } => {
                 self.place_glyph(*x, *y, glyph);
-                self.turtle_pos = Some((*x, *y));
                 self.render_screen(header, no_color)?;
                 tokio::time::sleep(Duration::from_millis(40)).await;
             }

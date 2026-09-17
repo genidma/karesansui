@@ -26,13 +26,7 @@ we just sit and stare at a blank terminal.
 ## Commands & Usage
 
 Run with zero arguments for the default Creative Freedom experience, or customize using
-CLI flags and the interactive startup menu:
-
-### Interactive Menu Mode (`-i` / `--interactive`)
-
-```bash
-cargo run -- -i
-```
+CLI flags:
 
 ### Command-Line Flags
 
@@ -62,7 +56,6 @@ cargo run -- --help
 | `--width <WIDTH>` | `-w` | `48` | Grid width in terminal columns |
 | `--height <HEIGHT>` | | `20` | Grid height in terminal rows |
 | `--pace <MS>` | `-p` | `80` | Milliseconds between animation steps |
-| `--interactive` | `-i` | `false` | Launch interactive menu selection |
 | `--dry-run` | `-d` | `false` | Offline simulation without LLM API calls |
 | `--step` | `-s` | `false` | Single-step mode: press Enter between each action |
 | `--snapshot <PATH>` | | — | Save final canvas to file |
@@ -145,9 +138,6 @@ docker run -it --rm -e LLM_API_KEY=sk-or-... karesansui
 Append flags after `--` so they are passed to the binary rather than to Docker:
 
 ```bash
-# Interactive menu mode
-docker run -it --rm --env-file .env karesansui -- -i
-
 # Dry-run with single-step verification, saving output
 docker run -it --rm --env-file .env karesansui -- --dry-run --step --snapshot /tmp/garden.txt
 ```
@@ -166,13 +156,9 @@ docker run -it --rm --env-file .env karesansui -- --dry-run --step --snapshot /t
 
 - `src/openrouter.rs` — `LlmClient` shared HTTP client: configurable endpoint, Bearer auth, exponential backoff, 429 Retry-After support, OpenRouter-specific headers.
 - `src/garden.rs` — `Garden` grid, `crossterm` rendering, `BorderPattern` (12 dynamic border styles), `Action` enum with `execute_action()` dispatch.
-- `src/llm.rs` — LLM prompt engine: composable prompts, FREE_MODELS allowlist, one-shot composition, offline simulation.
-- `src/main.rs` — CLI parser (`clap`), interactive menu (`-i`), `crossterm` screen management, `Ctrl+C` shutdown handler, single-step debugging (`--step`).
+- `src/llm.rs` — LLM prompt engine: open-ended one-shot composition prompt, FREE_MODELS allowlist, offline simulation.
+- `src/main.rs` — CLI parser (`clap`), `crossterm` screen management, `Ctrl+C` shutdown handler, single-step debugging (`--step`).
 - `src/vec.rs` — `Point` geometry, Bresenham lines, Midpoint Circle, distance calculations, filled rectangles.
-- `src/color.rs` — RGB color management, 5 pre-defined palettes, palette quantization.
-- `src/canvas.rs` — 2D pixel grid with drawing primitives and ANSI 24-bit RGB output.
-- `src/pixel_art.rs` — `PixelArtAction` enum for LLM-driven pixel art, `GridwrightConfig`, action executor.
-- `src/gridwright_runner.rs` — End-to-end LLM orchestration for Gridwright pixel art sessions.
 
 ## Credits
 

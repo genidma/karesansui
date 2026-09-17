@@ -23,6 +23,7 @@ impl Point {
     }
 
     /// Euclidean distance (squared, to avoid floating point).
+    #[allow(dead_code)]
     pub fn distance_squared(&self, other: Point) -> usize {
         let dx = ((self.x as isize - other.x as isize).abs()) as usize;
         let dy = ((self.y as isize - other.y as isize).abs()) as usize;
@@ -30,6 +31,7 @@ impl Point {
     }
 
     /// Generate a line of points between this and another using Bresenham's algorithm.
+    #[allow(dead_code)]
     pub fn line_to(&self, other: Point) -> Vec<Point> {
         let mut points = Vec::new();
         let (x0, y0) = (self.x as isize, self.y as isize);
@@ -108,6 +110,7 @@ impl Point {
     }
 
     /// Generate all points in a filled rectangle from this to another point.
+    #[allow(dead_code)]
     pub fn rect_filled(&self, other: Point) -> Vec<Point> {
         let mut points = Vec::new();
         let (min_x, max_x) = if self.x <= other.x { (self.x, other.x) } else { (other.x, self.x) };
@@ -122,6 +125,7 @@ impl Point {
     }
 
     /// Generate points forming the outline of a rectangle from this to another point.
+    #[allow(dead_code)]
     pub fn rect_outline(&self, other: Point) -> Vec<Point> {
         let mut points = Vec::new();
         let (min_x, max_x) = if self.x <= other.x { (self.x, other.x) } else { (other.x, self.x) };
