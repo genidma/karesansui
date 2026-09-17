@@ -22,60 +22,48 @@ pub struct Composer {
     is_nvidia: bool,
 }
 
-/// Extract the last non-empty fenced code block (```...```) from a string.
-/// Reasoning models often narrate first (possibly echoing ``` inline text),
-/// so we scan for *all* fenced blocks and return the final, non-empty artwork.
-fn extract_code_block<'a>(content: &'a str) -> Option<&'a str> {
-    let mut found: Option<&'a str> = None;
+/// Extract the actual artwork from a model response, robust to reasoning
+/// narration and truncated (unclosed) fenced blocks. Returns the last
+/// *complete* non-empty fenced block; empty blocks are treated as the real
+/// opener (how narration echoes `(````)`` mark the start of the art), and a
+/// trailing unclosed fence means the model was cut off mid-block, so the
+/// text after that final opener is the artwork.
+fn extract_art<'a>(content: &'a str) -> &'a str {
     let mut idx = 0;
-    while let Some(rel_open) = content[idx..].find("```") {
-        let open = idx + rel_open;
-        // Skip to the end of the opening-fence line (allows ```text etc.).
-        let after_fence = &content[open + 3..];
-        let line_end = after_fence.find('\n');
-        let content_start = match line_end {
+    let mut last_block: Option<&'a str> = None;
+    while let Some(rel) = content[idx..].find("```") {
+        let open = idx + rel;
+        // Skip past the opening-fence line (allows ```text etc.).
+        let seg = &content[open + 3..];
+        let line_end = seg.find('\n');
+        let body_start = match line_end {
             Some(nl) => open + 3 + nl + 1,
             None => content.len(),
         };
-        let tail = &content[content_start..];
+        let tail = &content[body_start..];
         match tail.find("```") {
             Some(rel_close) => {
-                let end = content_start + rel_close;
-                let block = content[content_start..end].trim();
-                if block.is_empty() {
-                    // Empty block: the fence we landed on is likely the real
-                    // opening fence of the artwork — rescan from it.
-                    idx = end;
+                let close = body_start + rel_close;
+                let body = content[body_start..close].trim();
+                if body.is_empty() {
+                    // Empty block: this fence is likely the real opener — rescan from it.
+                    idx = close;
                 } else {
-                    found = Some(block);
-                    idx = end + 3;
+                    last_block = Some(body);
+                    idx = close + 3;
                 }
             }
-            None => break,
-        }
-    }
-    found
-}
-
-/// Extract the actual artwork from a model response, robust to reasoning
-/// narration and truncated (unclosed) fenced blocks: always prefer the text
-/// that follows the final fenced-block opener.
-fn extract_art<'a>(content: &'a str) -> &'a str {
-    if let Some(i) = content.rfind("```") {
-        let after = content[i + 3..].strip_prefix('\n').unwrap_or(&content[i + 3..]);
-        let trimmed = after.trim();
-        if !trimmed.is_empty() {
-            return trimmed;
-        }
-        // The final ``` closes a completed block: back up to its opener.
-        if let Some(open) = content[..i].rfind("```") {
-            let body = content[open + 3..i].trim();
-            if !body.is_empty() {
-                return body;
+            None => {
+                // Trailing unclosed fence: the model was cut off mid-block.
+                let rest = tail.trim();
+                if !rest.is_empty() {
+                    return rest;
+                }
+                break;
             }
         }
     }
-    content
+    last_block.unwrap_or(content)
 }
 
 impl Composer {
@@ -214,22 +202,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extract_code_block_picks_last_fenced_art() {
+    fn extract_art_picks_the_art_after_narration() {
         let content = "Here's a thinking process:\n1. Use triple backticks (```) to mark art.\n```\n  /\\\n /  \\\n/____\\\n```\nSayonara.";
-        let got = extract_code_block(content).unwrap();
+        let got = extract_art(content);
         assert!(got.contains("/____\\"), "got: {got}");
         assert!(!got.contains("thinking"), "got: {got}");
+        assert!(!got.contains("Sayonara"), "got: {got}");
     }
 
     #[test]
-    fn extract_code_block_handles_languaged_fence() {
+    fn extract_art_handles_languaged_fence() {
         let content = "```text\n#\n#\n```";
-        assert_eq!(extract_code_block(content), Some("#\n#"));
+        assert_eq!(extract_art(content), "#\n#");
     }
 
     #[test]
-    fn extract_code_block_returns_none_without_fence() {
-        assert_eq!(extract_code_block("just some +++ art"), None);
+    fn extract_art_returns_whole_content_without_fence() {
+        let content = "just some +++ art";
+        assert_eq!(extract_art(content), content);
     }
 
     #[test]
