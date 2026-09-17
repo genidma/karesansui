@@ -158,6 +158,7 @@ docker run -it --rm --env-file .env karesansui -- --dry-run --step --snapshot /t
 | `LLM_API_KEY` | _(required)_ | API key (`nvapi-...`, `sk-or-...`, etc.) |
 | `LLM_API_URL` | `https://openrouter.ai/api/v1/chat/completions` | Any OpenAI-compatible endpoint |
 | `LLM_MODEL` | `tencent/hy3:free` | Model identifier |
+| `LLM_MAX_TOKENS` | `2000` | Response length cap; keep bounded (~1500-2000) for NVIDIA reasoning models so compositions return quickly |
 
 ## Layout
 

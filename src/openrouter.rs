@@ -27,6 +27,7 @@ pub struct LlmClient {
     api_key: String,
     pub model: String,
     pub api_url: String,
+    max_tokens: u32,
 }
 
 impl LlmClient {
@@ -34,12 +35,17 @@ impl LlmClient {
         let api_url = std::env::var("LLM_API_URL")
             .or_else(|_| std::env::var("OPENROUTER_URL"))
             .unwrap_or_else(|_| DEFAULT_API_URL.to_string());
-        log::info!("LLM API endpoint: {api_url}");
+        let max_tokens = std::env::var("LLM_MAX_TOKENS")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(2000);
+        log::info!("LLM API endpoint: {api_url}, max_tokens: {max_tokens}");
         Self {
             client: reqwest::Client::new(),
             api_key,
             model,
             api_url,
+            max_tokens,
         }
     }
 
@@ -66,6 +72,7 @@ impl LlmClient {
             ],
             "temperature": temperature,
             "stream": false,
+            "max_tokens": self.max_tokens,
         });
 
         let mut backoff = Duration::from_millis(1000);
