@@ -22,24 +22,39 @@ pub struct Composer {
     is_nvidia: bool,
 }
 
-/// Extract the first fenced code block (```...```) from a string. Returns None if no block found.
+/// Extract the last non-empty fenced code block (```...```) from a string.
+/// Reasoning models often narrate first (possibly echoing ``` inline text),
+/// so we scan for *all* fenced blocks and return the final, non-empty artwork.
 fn extract_code_block<'a>(content: &'a str) -> Option<&'a str> {
-    // Find the opening ```
-    let start_marker = "```\n";
-    let start = content.find(start_marker).map(|i| i + start_marker.len())
-        .or_else(|| {
-            // Try with rest of line after ```
-            let idx = content.find("```")?;
-            let rest = &content[idx + 3..];
-            let newline = rest.find('\n')?;
-            Some(idx + 3 + newline + 1)
-        })?;
-    // Find the closing ```
-    let end = content[start..].find("```")?;
-    let block = &content[start..start + end];
-    // Remove trailing newline if present
-    let trimmed = block.strip_suffix('\n').unwrap_or(block);
-    if trimmed.is_empty() { None } else { Some(trimmed) }
+    let mut found: Option<&'a str> = None;
+    let mut idx = 0;
+    while let Some(rel_open) = content[idx..].find("```") {
+        let open = idx + rel_open;
+        // Skip to the end of the opening-fence line (allows ```text etc.).
+        let after_fence = &content[open + 3..];
+        let line_end = after_fence.find('\n');
+        let content_start = match line_end {
+            Some(nl) => open + 3 + nl + 1,
+            None => content.len(),
+        };
+        let tail = &content[content_start..];
+        match tail.find("```") {
+            Some(rel_close) => {
+                let end = content_start + rel_close;
+                let block = content[content_start..end].trim();
+                if block.is_empty() {
+                    // Empty block: the fence we landed on is likely the real
+                    // opening fence of the artwork — rescan from it.
+                    idx = end;
+                } else {
+                    found = Some(block);
+                    idx = end + 3;
+                }
+            }
+            None => break,
+        }
+    }
+    found
 }
 
 impl Composer {
@@ -165,5 +180,29 @@ impl Composer {
             lines.push(row);
         }
         Ok(vec![Action::DisplayRawArt { lines }])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_code_block_picks_last_fenced_art() {
+        let content = "Here's a thinking process:\n1. Use triple backticks (```) to mark art.\n```\n  /\\\n /  \\\n/____\\\n```\nSayonara.";
+        let got = extract_code_block(content).unwrap();
+        assert!(got.contains("/____\\"), "got: {got}");
+        assert!(!got.contains("thinking"), "got: {got}");
+    }
+
+    #[test]
+    fn extract_code_block_handles_languaged_fence() {
+        let content = "```text\n#\n#\n```";
+        assert_eq!(extract_code_block(content), Some("#\n#"));
+    }
+
+    #[test]
+    fn extract_code_block_returns_none_without_fence() {
+        assert_eq!(extract_code_block("just some +++ art"), None);
     }
 }
