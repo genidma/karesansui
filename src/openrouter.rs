@@ -64,7 +64,8 @@ impl LlmClient {
         temperature: f64,
         title: &str,
     ) -> Result<String> {
-        let body = json!({
+        let is_nvidia = self.is_nvidia();
+        let mut body = json!({
             "model": self.model,
             "messages": [
                 { "role": "system", "content": system },
@@ -74,6 +75,11 @@ impl LlmClient {
             "stream": false,
             "max_tokens": self.max_tokens,
         });
+        if is_nvidia {
+            // NVIDIA reasoning models default to narrating their thinking aloud;
+            // disable reasoning so they express the artwork directly as an artist.
+            body["reasoning"] = json!({ "enabled": false });
+        }
 
         let mut backoff = Duration::from_millis(1000);
 

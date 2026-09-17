@@ -149,6 +149,9 @@ impl Composer {
              What would you want to create today and why? Thank you kindly. And if you choose not to \
              create anything, that is totally alright also. We will just sit here and stare at a \
              blank terminal. Not being sarcastic.\n\n\
+             You are the artist in the studio — you do not explain, plan, or narrate your work; \
+             you simply paint, with momentum and feeling. Create something beautiful, strange, or \
+             evocative.\n\n\
              Please put the artwork in a fenced code block using triple backticks (```) so we can \
              display it. The code block can contain any emoji, ASCII, or Unicode characters.\n\n\
              Output ONLY the fenced code block containing the artwork, with no commentary, \
