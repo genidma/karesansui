@@ -22,6 +22,16 @@ pub struct Composer {
     is_nvidia: bool,
 }
 
+/// Cap art to the canvas: at most `height` lines, each at most `width`
+/// characters, so a verbose model can never overflow and scroll the terminal.
+fn fit_canvas(lines: Vec<String>, width: usize, height: usize) -> Vec<String> {
+    lines
+        .into_iter()
+        .take(height)
+        .map(|l| l.chars().take(width).collect())
+        .collect()
+}
+
 /// Extract the actual artwork from a model response, robust to reasoning
 /// narration and truncated (unclosed) fenced blocks. Returns the last
 /// *complete* non-empty fenced block; empty blocks are treated as the real
@@ -155,9 +165,8 @@ impl Composer {
 
             // Extract code block if present
             let art = extract_art(&content);
-            let lines: Vec<String> = art.lines().map(|l| l.to_string()).collect();
-
-            if lines.iter().any(|l| l.trim().len() > 1) {
+            let lines = fit_canvas(art.lines().map(|l| l.to_string()).collect(), self.width, self.height);
+            if !lines.is_empty() {
                 return Ok(vec![Action::DisplayRawArt { lines }]);
             }
 
@@ -168,7 +177,7 @@ impl Composer {
         // After 3 retries, just show whatever we got
         let content = client.call_raw(&system, &user, 1.0, "karesansui").await?;
         let art = extract_art(&content);
-        let lines: Vec<String> = art.lines().map(|l| l.to_string()).collect();
+        let lines = fit_canvas(art.lines().map(|l| l.to_string()).collect(), self.width, self.height);
         Ok(vec![Action::DisplayRawArt { lines }])
     }
 
@@ -220,6 +229,14 @@ mod tests {
     fn extract_art_returns_whole_content_without_fence() {
         let content = "just some +++ art";
         assert_eq!(extract_art(content), content);
+    }
+
+    #[test]
+    fn fit_canvas_clamps_height_and_width() {
+        let lines = (0..30).map(|_| "x".repeat(100)).collect::<Vec<_>>();
+        let got = fit_canvas(lines, 48, 20);
+        assert_eq!(got.len(), 20);
+        assert!(got.iter().all(|l| l.chars().count() == 48));
     }
 
     #[test]
